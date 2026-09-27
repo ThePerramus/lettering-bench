@@ -506,13 +506,12 @@ class TextController:
             )
 
     def on_line_spacing_change(self, line_spacing: str):
-        if self.main.curr_tblock_item and line_spacing:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
+        if self._selected_text_items() and line_spacing:
             spacing = float(line_spacing)
-            item.set_line_spacing(spacing)
-            command.finalize_new_state()
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_line_spacing",
+                lambda item: item.set_line_spacing(spacing),
+            )
 
     def on_font_color_change(self):
         font_color = self.main.get_color()
@@ -528,63 +527,56 @@ class TextController:
                 )
 
     def left_align(self):
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
-            item.set_alignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-            command.finalize_new_state()
-            self.main.push_command(command)
+        if self._selected_text_items():
+            self._apply_format_to_selected(
+                "change_text_alignment",
+                lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignLeft),
+            )
 
     def center_align(self):
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
-            item.set_alignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            command.finalize_new_state()
-            self.main.push_command(command)
+        if self._selected_text_items():
+            self._apply_format_to_selected(
+                "change_text_alignment",
+                lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignCenter),
+            )
 
     def right_align(self):
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
-            item.set_alignment(QtCore.Qt.AlignmentFlag.AlignRight)
-            command.finalize_new_state()
-            self.main.push_command(command)
+        if self._selected_text_items():
+            self._apply_format_to_selected(
+                "change_text_alignment",
+                lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignRight),
+            )
 
     def justify_align(self):
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
-            item.set_alignment(QtCore.Qt.AlignmentFlag.AlignJustify)
-            command.finalize_new_state()
-            self.main.push_command(command)
+        if self._selected_text_items():
+            self._apply_format_to_selected(
+                "change_text_alignment",
+                lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignJustify),
+            )
 
     def bold(self):
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
+        if self._selected_text_items():
             state = self.main.bold_button.isChecked()
-            item.set_bold(state)
-            command.finalize_new_state()
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_bold",
+                lambda item: item.set_bold(state),
+            )
 
     def italic(self):
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
+        if self._selected_text_items():
             state = self.main.italic_button.isChecked()
-            item.set_italic(state)
-            command.finalize_new_state()
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_italic",
+                lambda item: item.set_italic(state),
+            )
 
     def underline(self):
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
+        if self._selected_text_items():
             state = self.main.underline_button.isChecked()
-            item.set_underline(state)
-            command.finalize_new_state()
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_underline",
+                lambda item: item.set_underline(state),
+            )
 
     def on_outline_color_change(self):
         outline_color = self.main.get_color()
@@ -595,38 +587,38 @@ class TextController:
             self.main.outline_font_color_button.setProperty('selected_color', outline_color.name())
             outline_width = float(self.main.outline_width_dropdown.currentText())
 
-            if self.main.curr_tblock_item and self.main.outline_checkbox.isChecked():
-                item = self.main.curr_tblock_item
-                command = TextFormatCommand(self.main.image_viewer, item)
-                item.set_outline(outline_color, outline_width)
-                command.finalize_new_state()
-                self.main.push_command(command)
+            if self._selected_text_items() and self.main.outline_checkbox.isChecked():
+                self._apply_format_to_selected(
+                    "change_text_outline_color",
+                    lambda item: item.set_outline(outline_color, outline_width),
+                )
 
     def on_outline_width_change(self, outline_width):
-        if self.main.curr_tblock_item and self.main.outline_checkbox.isChecked():
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
+        if self._selected_text_items() and self.main.outline_checkbox.isChecked():
             outline_width = float(self.main.outline_width_dropdown.currentText())
             color_str = self.main.outline_font_color_button.property('selected_color')
             color = QColor(color_str)
-            item.set_outline(color, outline_width)
-            command.finalize_new_state()
-            self.main.push_command(command)
+            self._apply_format_to_selected(
+                "change_text_outline_width",
+                lambda item: item.set_outline(color, outline_width),
+            )
 
     def toggle_outline_settings(self, state):
         enabled = True if state == 2 else False
-        if self.main.curr_tblock_item:
-            item = self.main.curr_tblock_item
-            command = TextFormatCommand(self.main.image_viewer, item)
+        if self._selected_text_items():
             if not enabled:
-                item.set_outline(None, None)
+                self._apply_format_to_selected(
+                    "toggle_text_outline",
+                    lambda item: item.set_outline(None, None),
+                )
             else:
                 outline_width = float(self.main.outline_width_dropdown.currentText())
                 color_str = self.main.outline_font_color_button.property('selected_color')
                 color = QColor(color_str)
-                item.set_outline(color, outline_width)
-            command.finalize_new_state()
-            self.main.push_command(command)
+                self._apply_format_to_selected(
+                    "toggle_text_outline",
+                    lambda item: item.set_outline(color, outline_width),
+                )
 
     # Widget helpers
     def block_text_item_widgets(self, widgets):
