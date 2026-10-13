@@ -100,19 +100,25 @@ class GPTOCR(OCREngine):
         }
         
         # Make POST request to OpenAI API
-        response = requests.post(
-            self.api_base_url,
-            headers=headers,
-            data=json.dumps(payload),
-            timeout=20
-        )
-        
-        # Parse response
-        if response.status_code == 200:
-            response_json = response.json()
-            text = response_json['choices'][0]['message']['content']
-            # Replace newlines with spaces
-            return text.replace('\n', ' ') if '\n' in text else text
-        else:
-            print(f"API error: {response.status_code} {response.text}")
-            return ""
+        try:
+            response = requests.post(
+                self.api_base_url,
+                headers=headers,
+                data=json.dumps(payload),
+                timeout=20
+            )
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            error_msg = f"API request failed: {str(e)}"
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_details = e.response.json()
+                    error_msg += f" - {json.dumps(error_details)}"
+                except Exception:
+                    error_msg += f" - Status code: {e.response.status_code}"
+            raise RuntimeError(error_msg) from e
+
+        response_json = response.json()
+        text = response_json['choices'][0]['message']['content']
+        # Replace newlines with spaces
+        return text.replace('\n', ' ') if '\n' in text else text

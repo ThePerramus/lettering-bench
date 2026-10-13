@@ -7,6 +7,7 @@ from .base import OCREngine
 from .microsoft_ocr import MicrosoftOCR
 from .google_ocr import GoogleOCR
 from .gpt_ocr import GPTOCR
+from .custom_ocr import CustomOCR
 from .ppocr import PPOCRv5Engine
 from .manga_ocr.mobile import MangaOCRMobileONNXEngine
 from .pororo.onnx_engine import PororoOCREngineONNX  
@@ -157,6 +158,7 @@ class OCRFactory:
             'Google Cloud Vision': cls._create_google_ocr,
             'GPT-4.1-mini': lambda s: cls._create_gpt_ocr(s, ocr_model),
             'Gemini-2.5-Flash-Lite': lambda s: cls._create_gemini_ocr(s, ocr_model),
+            'Custom': cls._create_custom_ocr,
         }
         
         make_japanese = lambda s: cls._create_manga_ocr(s, effective_backend)
@@ -230,6 +232,12 @@ class OCRFactory:
         engine.initialize(api_key=api_key, model=model)
         return engine
     
+    @staticmethod
+    def _create_custom_ocr(settings) -> OCREngine:
+        engine = CustomOCR()
+        engine.initialize(settings)
+        return engine
+
     @staticmethod
     def _create_manga_ocr(settings, backend: str = 'onnx') -> OCREngine:
         device = resolve_device(settings.is_gpu_enabled(), backend)

@@ -57,9 +57,10 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.inpainters = ['LaMa', 'AOT']
         self.detectors = ['RT-DETR-v2']
         self.ocr_engines = [
-            self.tr("Default"), 
-            self.tr('Microsoft OCR'), 
-            self.tr('Gemini-2.5-Flash-Lite'), 
+            self.tr("Default"),
+            self.tr('Microsoft OCR'),
+            self.tr('Gemini-2.5-Flash-Lite'),
+            self.tr("Custom"),
         ]
         self.inpaint_strategy = [self.tr('Resize'), self.tr('Original'), self.tr('Crop')]
         self.themes = [self.tr('Dark'), self.tr('Light')]
@@ -172,8 +173,8 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.supported_translators = [self._catalog_label(item, is_ocr=False) for item in translators] + [self.tr("Custom")]
             set_combo_box_width(self.translator_combo, self.supported_translators)
         if ocr_models:
-            self._replace_combo_items(self.ocr_combo, ocr_models)
-            self.ocr_engines = [self._catalog_label(item, is_ocr=True) for item in ocr_models]
+            self._replace_combo_items(self.ocr_combo, ocr_models, include_custom=True)
+            self.ocr_engines = [self._catalog_label(item, is_ocr=True) for item in ocr_models] + [self.tr("Custom")]
             set_combo_box_width(self.ocr_combo, self.ocr_engines)
 
     def _catalog_label(self, item: dict, is_ocr: bool) -> str:
