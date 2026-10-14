@@ -128,9 +128,14 @@ class WorkspaceMixin:
         for button, (row, col) in zip(pipeline_buttons, pipeline_positions):
             self.top_action_grid.addWidget(button, row, col)
 
+        # self.loading sits in this row (not its own, below) so it doesn't
+        # add a row that appears/disappears and shifts everything below it
+        # while a long-running step is active - in Manual mode this spot is
+        # blank anyway (play/report are Automatic-only).
         mode_controls_row = QtWidgets.QHBoxLayout()
         mode_controls_row.addWidget(self.webtoon_toggle)
         mode_controls_row.addWidget(self.mode_switch)
+        mode_controls_row.addWidget(self.loading)
         mode_controls_row.addWidget(self.play_stop_button)
         mode_controls_row.addWidget(self.batch_report_button)
         mode_controls_row.addStretch()
@@ -138,7 +143,6 @@ class WorkspaceMixin:
         self.top_actions_layout = QtWidgets.QVBoxLayout()
         self.top_actions_layout.addLayout(self.top_action_grid)
         self.top_actions_layout.addLayout(mode_controls_row)
-        self.top_actions_layout.addWidget(self.loading)
 
         # Kept fully wired (see comments above) but never actually shown -
         # parented here just so they have a home.
