@@ -6,6 +6,7 @@ from app.ui.dayu_widgets import dayu_theme
 from app.ui.dayu_widgets.browser import MDragFileButton
 from app.ui.dayu_widgets.button_group import MPushButtonGroup, MToolButtonGroup
 from app.ui.dayu_widgets.check_box import MCheckBox
+from app.ui.dayu_widgets.collapse import MCollapse
 from app.ui.dayu_widgets.combo_box import MComboBox, MFontComboBox
 from app.ui.dayu_widgets.divider import MDivider
 from app.ui.dayu_widgets.label import MLabel
@@ -325,11 +326,24 @@ class WorkspaceMixin:
         text_render_layout.addLayout(outline_settings_layout)
         text_render_layout.addWidget(rendering_divider_bottom)
 
+        # Hidden on reference-workflow pages (toggled from
+        # _sync_hbutton_group_for_reference, tools.py) - Recognize/Translate
+        # are disabled there and Render reveals the reference's own pixels
+        # instead of drawing styled text, so none of this applies.
+        self.text_section_widget = QtWidgets.QWidget()
+        text_section_layout = QtWidgets.QVBoxLayout(self.text_section_widget)
+        text_section_layout.setContentsMargins(0, 0, 0, 0)
+        text_section_layout.addLayout(input_layout)
+        text_section_layout.addLayout(text_render_layout)
+
         tools_widget = QtWidgets.QWidget()
         tools_layout = QtWidgets.QVBoxLayout()
 
-        misc_lay = QtWidgets.QHBoxLayout()
-
+        # Pan is a general canvas tool (not tied to text/language), so it
+        # lives with the other box/canvas tools below instead of its own
+        # row - set_all_button, on the other hand, operates on the language
+        # combos in self.text_section_widget, so it's added there instead
+        # (see below) and hides along with them on reference-workflow pages.
         self.pan_button = self.create_tool_button(svg="pan_tool.svg", checkable=True)
         self.pan_button.setToolTip(self.tr("Pan Image"))
         self.pan_button.clicked.connect(self.toggle_pan_tool)
@@ -339,12 +353,10 @@ class WorkspaceMixin:
         self.set_all_button.setToolTip(
             self.tr("Sets the Source and Target Language on the current page for all pages")
         )
-
-        misc_lay.addWidget(self.pan_button)
-        misc_lay.addWidget(self.set_all_button)
-        misc_lay.addStretch()
+        text_section_layout.addWidget(self.set_all_button)
 
         box_tools_lay = QtWidgets.QHBoxLayout()
+        box_tools_lay.addWidget(self.pan_button)
 
         self.box_button = self.create_tool_button(svg="select.svg", checkable=True)
         self.box_button.setToolTip(self.tr("Draw or Select Text Boxes"))
@@ -521,25 +533,42 @@ class WorkspaceMixin:
             "Reference Overlay Opacity - Not the Reveal Pencil's Size, See 'Tool Size' Above"))
         self.reference_opacity_slider.valueChanged.connect(self.set_reference_opacity)
 
-        tools_layout.addLayout(misc_lay)
-        box_div = MDivider(self.tr("Box Drawing"))
-        tools_layout.addWidget(box_div)
-        tools_layout.addLayout(box_tools_lay)
+        box_section_widget = QtWidgets.QWidget()
+        box_section_layout = QtWidgets.QVBoxLayout(box_section_widget)
+        box_section_layout.setContentsMargins(0, 0, 0, 0)
+        box_section_layout.addLayout(box_tools_lay)
 
-        inp_div = MDivider(self.tr("Inpainting"))
-        tools_layout.addWidget(inp_div)
-        tools_layout.addLayout(inp_tools_lay)
-        tools_layout.addWidget(self.brush_size_label)
-        tools_layout.addWidget(self.brush_eraser_slider)
+        inpainting_section_widget = QtWidgets.QWidget()
+        inpainting_section_layout = QtWidgets.QVBoxLayout(inpainting_section_widget)
+        inpainting_section_layout.setContentsMargins(0, 0, 0, 0)
+        inpainting_section_layout.addLayout(inp_tools_lay)
+        inpainting_section_layout.addWidget(self.brush_size_label)
+        inpainting_section_layout.addWidget(self.brush_eraser_slider)
 
-        ref_div = MDivider(self.tr("Reference Page (Align a Second Scan)"))
-        tools_layout.addWidget(ref_div)
-        tools_layout.addLayout(ref_book_lay)
-        tools_layout.addLayout(ref_preview_lay)
-        tools_layout.addWidget(self.reference_excluded_checkbox)
-        tools_layout.addLayout(ref_tools_lay)
-        tools_layout.addWidget(self.reference_opacity_label)
-        tools_layout.addWidget(self.reference_opacity_slider)
+        reference_section_widget = QtWidgets.QWidget()
+        reference_section_layout = QtWidgets.QVBoxLayout(reference_section_widget)
+        reference_section_layout.setContentsMargins(0, 0, 0, 0)
+        reference_section_layout.addLayout(ref_book_lay)
+        reference_section_layout.addLayout(ref_preview_lay)
+        reference_section_layout.addWidget(self.reference_excluded_checkbox)
+        reference_section_layout.addLayout(ref_tools_lay)
+        reference_section_layout.addWidget(self.reference_opacity_label)
+        reference_section_layout.addWidget(self.reference_opacity_slider)
+
+        # Collapsible instead of one permanently-expanded column of
+        # dividers - Reference Page in particular only matters for comics
+        # using that workflow, so it starts closed (auto-opened per page by
+        # _sync_hbutton_group_for_reference in tools.py, which also hides
+        # self.text_section_widget above while a reference page is active).
+        self.tools_collapse = MCollapse()
+        self.tools_collapse.add_section_list([
+            {"title": self.tr("Box Drawing"), "widget": box_section_widget, "expand": True},
+            {"title": self.tr("Inpainting"), "widget": inpainting_section_widget, "expand": True},
+            {"title": self.tr("Reference Page (Align a Second Scan)"), "widget": reference_section_widget, "expand": False},
+        ])
+        self.reference_section_item = self.tools_collapse._section_list[2]
+
+        tools_layout.addWidget(self.tools_collapse)
         tools_layout.addStretch()
         tools_widget.setLayout(tools_layout)
 
@@ -550,8 +579,7 @@ class WorkspaceMixin:
         tools_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         tools_scroll.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
-        right_layout.addLayout(input_layout)
-        right_layout.addLayout(text_render_layout)
+        right_layout.addWidget(self.text_section_widget)
         right_layout.addWidget(tools_scroll, 1)
 
         right_widget = QtWidgets.QWidget()

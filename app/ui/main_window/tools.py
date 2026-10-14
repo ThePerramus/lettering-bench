@@ -387,11 +387,13 @@ class ToolStateMixin:
         return any_done
 
     def _sync_hbutton_group_for_reference(self):
-        """Applies the Recognize/Translate reference-page gating on its own,
+        """Applies the Recognize/Translate reference-page gating, hides the
+        text/style panel, and auto-expands the Reference Page tools section -
         called on every page switch. Uses Detect's own enabled state as a
         proxy for "is the manual button group actually active right now" so
-        this never fights disable_hbutton_group() while work is in progress,
-        or re-enables anything while Automatic mode has the group disabled."""
+        the button-gating part never fights disable_hbutton_group() while
+        work is in progress, or re-enables anything while Automatic mode has
+        the group disabled."""
         if not self.image_files:
             return
         buttons = self.hbutton_group.get_button_group().buttons()
@@ -402,6 +404,11 @@ class ToolStateMixin:
         elif buttons[0].isEnabled():
             buttons[1].setEnabled(True)
             buttons[2].setEnabled(True)
+
+        if hasattr(self, "text_section_widget"):
+            self.text_section_widget.setVisible(not uses_reference)
+        if hasattr(self, "reference_section_item"):
+            self.reference_section_item.set_expand(uses_reference)
 
     def render_or_reveal(self):
         """The Render button's handler: for pages using the reference

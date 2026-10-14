@@ -1431,6 +1431,8 @@ class ProjectController:
         settings.setValue("brush_size", self.main.image_viewer.brush_size)
         settings.setValue("eraser_size", self.main.image_viewer.eraser_size)
 
+        settings.setValue("page_list_visible", self.main.page_list_toggle_button.isChecked())
+
         settings.endGroup()
 
         # Save window state
@@ -1464,6 +1466,11 @@ class ProjectController:
         eraser_size = int(settings.value("eraser_size", 20))  # Default value is 20
         self.main.image_viewer.brush_size = brush_size
         self.main.image_viewer.eraser_size = eraser_size
+
+        # Collapsed by default on first run; remembered after that.
+        page_list_visible = settings.value("page_list_visible", False, type=bool)
+        self.main.page_list_toggle_button.setChecked(page_list_visible)
+        self.main._set_page_list_panel_visible(page_list_visible)
 
         settings.endGroup()
 
