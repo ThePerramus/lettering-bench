@@ -159,6 +159,14 @@ class NavRailMixin:
         self.settings_nav_button = nav_buttons[2]
         self.startup_nav_button.setChecked(True)
 
+        self.page_list_toggle_button = MToolButton()
+        self.page_list_toggle_button.set_dayu_svg("list_view.svg")
+        self.page_list_toggle_button.setToolTip(self.tr("Show/Hide Page List"))
+        self.page_list_toggle_button.setCheckable(True)
+        self.page_list_toggle_button.setChecked(True)
+        self.page_list_toggle_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.page_list_toggle_button.toggled.connect(self._set_page_list_panel_visible)
+
         self.search_sidebar_button = MToolButton()
         self.search_sidebar_button.set_dayu_svg("search_line.svg")
         self.search_sidebar_button.setToolTip(self.tr("Search / Replace (Ctrl+F)"))
@@ -197,12 +205,18 @@ class NavRailMixin:
         nav_rail_layout.addWidget(self.save_browser)
         nav_rail_layout.addWidget(self.save_all_button)
         nav_rail_layout.addWidget(nav_divider)
+        nav_rail_layout.addWidget(self.page_list_toggle_button)
         nav_rail_layout.addWidget(self.search_sidebar_button)
         nav_rail_layout.addWidget(nav_tool_group)
         nav_rail_layout.addStretch()
         nav_rail_layout.setContentsMargins(0, 0, 0, 0)
 
         return nav_rail_layout
+
+    def _set_page_list_panel_visible(self, visible: bool):
+        left_widget = getattr(self, "left_widget", None)
+        if left_widget is not None:
+            left_widget.setVisible(visible)
 
     def _set_search_sidebar_visible(self, visible: bool):
         if not hasattr(self, "search_panel") or not hasattr(self, "page_list"):

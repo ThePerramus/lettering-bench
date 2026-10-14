@@ -167,6 +167,8 @@ class ComicTranslateUI(
 
         main_widget = QtWidgets.QWidget()
         self.main_layout = QtWidgets.QHBoxLayout()
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
         main_widget.setLayout(self.main_layout)
         outer_layout.addWidget(main_widget)
 

@@ -129,6 +129,7 @@ class ComicTranslate(ComicTranslateUI):
         self.current_worker = None
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._refresh_play_stop_button()
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
@@ -197,7 +198,10 @@ class ComicTranslate(ComicTranslateUI):
        
         self.manual_radio.clicked.connect(self.manual_mode_selected)
         self.automatic_radio.clicked.connect(self.batch_mode_selected)
-        
+        self.automatic_radio.toggled.connect(self.mode_switch.setChecked)
+        self.mode_switch.toggled.connect(self._on_mode_switch_toggled)
+        self.play_stop_button.clicked.connect(self._on_play_stop_clicked)
+
         # Webtoon mode toggle
         self.webtoon_toggle.clicked.connect(self.webtoon_ctrl.toggle_webtoon_mode)
 
@@ -518,13 +522,43 @@ class ComicTranslate(ComicTranslateUI):
 
     def batch_mode_selected(self):
         self.disable_hbutton_group()
+        for button in self.hbutton_group.get_button_group().buttons():
+            button.setVisible(False)
+        self.play_stop_button.setVisible(True)
+        self.batch_report_button.setVisible(True)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
 
     def manual_mode_selected(self):
         self.enable_hbutton_group()
+        for button in self.hbutton_group.get_button_group().buttons():
+            button.setVisible(True)
+        self.play_stop_button.setVisible(False)
+        self.batch_report_button.setVisible(False)
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
+
+    def _on_mode_switch_toggled(self, is_automatic: bool):
+        if is_automatic:
+            self.automatic_radio.setChecked(True)
+            self.batch_mode_selected()
+        else:
+            self.manual_radio.setChecked(True)
+            self.manual_mode_selected()
+
+    def _on_play_stop_clicked(self):
+        if self._batch_active:
+            self.cancel_current_task()
+        else:
+            self.start_batch_process()
+
+    def _refresh_play_stop_button(self):
+        if self._batch_active:
+            self.play_stop_button.set_dayu_svg("stop_fill.svg")
+            self.play_stop_button.setToolTip(self.tr("Stop"))
+        else:
+            self.play_stop_button.set_dayu_svg("play_fill.svg")
+            self.play_stop_button.setToolTip(self.tr("Translate All"))
 
     def on_manual_finished(self):
         self.loading.setVisible(False)
@@ -698,6 +732,7 @@ class ComicTranslate(ComicTranslateUI):
             self.batch_mode_selected()
         self._batch_active = True
         self._batch_cancel_requested = False
+        self._refresh_play_stop_button()
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.save_as_project_button.setEnabled(False)
@@ -745,6 +780,7 @@ class ComicTranslate(ComicTranslateUI):
         report = self._finalize_batch_report(was_cancelled)
         self._batch_active = False
         self._batch_cancel_requested = False
+        self._refresh_play_stop_button()
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)

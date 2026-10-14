@@ -13,9 +13,11 @@ from app.ui.dayu_widgets.line_edit import MLineEdit
 from app.ui.dayu_widgets.loading import MLoading
 from app.ui.dayu_widgets.progress_bar import MProgressBar
 from app.ui.dayu_widgets.push_button import MPushButton
+from app.ui.dayu_widgets.qt import MIcon
 from app.ui.dayu_widgets.radio_button import MRadioButton
 from app.ui.dayu_widgets.slider import MSlider
 from app.ui.dayu_widgets.spin_box import MSpinBox
+from app.ui.dayu_widgets.switch import MSwitch
 from app.ui.dayu_widgets.text_edit import MTextEdit
 from app.ui.dayu_widgets.tool_button import MToolButton
 from app.ui.search_replace_panel import SearchReplacePanel
@@ -25,8 +27,6 @@ from app.ui.main_window.constants import supported_source_languages, supported_t
 class WorkspaceMixin:
     def _create_main_content(self):
         content_widget = QtWidgets.QWidget()
-
-        header_layout = QtWidgets.QHBoxLayout()
 
         self.undo_tool_group = MToolButtonGroup(orientation=QtCore.Qt.Horizontal, exclusive=True)
         undo_tools = [
@@ -44,11 +44,18 @@ class WorkspaceMixin:
             {"text": self.tr("Render"), "dayu_type": MPushButton.DefaultType, "enabled": False},
         ]
 
+        # MPushButtonGroup only lays its buttons out in a single row/column,
+        # so it's used here purely as the logical QButtonGroup holder (every
+        # other reference to self.hbutton_group just wants
+        # .get_button_group().buttons()[i], regardless of how they're
+        # arranged on screen) - the actual grid below re-parents the same
+        # six button widgets into its own layout.
         self.hbutton_group = MPushButtonGroup()
         self.hbutton_group.set_dayu_size(dayu_theme.small)
         self.hbutton_group.set_button_list(button_config_list)
         self.hbutton_group.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        for button in self.hbutton_group.get_button_group().buttons():
+        pipeline_buttons = self.hbutton_group.get_button_group().buttons()
+        for button in pipeline_buttons:
             button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
         self.progress_bar = MProgressBar().auto_color()
@@ -58,6 +65,10 @@ class WorkspaceMixin:
         self.loading = MLoading().small()
         self.loading.setVisible(False)
 
+        # Kept as the real state (and as what the rest of the app already
+        # reads/sets: project load/save, _run_batch_for_paths, etc.) but no
+        # longer shown directly - self.mode_switch below is the visible
+        # control, kept in sync with these in _setup_connections.
         self.manual_radio = MRadioButton(self.tr("Manual"))
         self.manual_radio.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
@@ -65,39 +76,86 @@ class WorkspaceMixin:
         self.automatic_radio.setChecked(True)
         self.automatic_radio.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
+        self.mode_switch = MSwitch()
+        self.mode_switch.small()
+        self.mode_switch.setChecked(True)
+        self.mode_switch.setToolTip(
+            self.tr("Automatic Mode (Translate All in one go) - off for Manual Mode (step by step)")
+        )
+        self.mode_switch.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
         self.webtoon_toggle = MToolButton()
         self.webtoon_toggle.set_dayu_svg("webtoon-toggle.svg")
-        self.webtoon_toggle.huge()
+        self.webtoon_toggle.small()
         self.webtoon_toggle.setCheckable(True)
         self.webtoon_toggle.setToolTip(
             self.tr("Toggle Webtoon Mode. " "For comics that are read in long vertical strips")
         )
         self.webtoon_toggle.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
+        # Kept as the real state/wiring (start_batch_process/cancel_current_task
+        # stay connected to these) but no longer shown - self.play_stop_button
+        # below is the single visible control, refreshed by _refresh_play_stop_button.
         self.translate_button = MPushButton(self.tr("Translate All"))
         self.translate_button.setEnabled(True)
         self.translate_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.cancel_button = MPushButton(self.tr("Cancel"))
         self.cancel_button.setEnabled(True)
         self.cancel_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        self.batch_report_button = MPushButton(self.tr("Report"))
+
+        self.play_stop_button = MToolButton()
+        self.play_stop_button.set_dayu_svg("play_fill.svg")
+        self.play_stop_button.setToolTip(self.tr("Translate All"))
+        self.play_stop_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+        self.batch_report_button = MToolButton()
+        self.batch_report_button.set_dayu_svg("mingcute--document-line.svg")
+        self.batch_report_button.setToolTip(self.tr("Report"))
         self.batch_report_button.setEnabled(False)
         self.batch_report_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
-        header_layout.addWidget(self.hbutton_group)
-        header_layout.addWidget(self.loading)
-        header_layout.addStretch()
-        header_layout.addWidget(self.webtoon_toggle)
-        header_layout.addWidget(self.manual_radio)
-        header_layout.addWidget(self.automatic_radio)
-        header_layout.addWidget(self.translate_button)
-        header_layout.addWidget(self.cancel_button)
-        header_layout.addWidget(self.batch_report_button)
+        # Pipeline grid on its own - webtoon/mode_switch/play/report are all
+        # one compact row below instead of sharing grid cells with the
+        # pipeline buttons (putting them in the same cells made them stretch
+        # to fill the whole row once the pipeline buttons around them were
+        # hidden).
+        self.top_action_grid = QtWidgets.QGridLayout()
+        self.top_action_grid.setContentsMargins(0, 0, 0, 0)
+        self.top_action_grid.setSpacing(1)
+
+        pipeline_positions = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
+        for button, (row, col) in zip(pipeline_buttons, pipeline_positions):
+            self.top_action_grid.addWidget(button, row, col)
+
+        mode_controls_row = QtWidgets.QHBoxLayout()
+        mode_controls_row.addWidget(self.webtoon_toggle)
+        mode_controls_row.addWidget(self.mode_switch)
+        mode_controls_row.addWidget(self.play_stop_button)
+        mode_controls_row.addWidget(self.batch_report_button)
+        mode_controls_row.addStretch()
+
+        self.top_actions_layout = QtWidgets.QVBoxLayout()
+        self.top_actions_layout.addLayout(self.top_action_grid)
+        self.top_actions_layout.addLayout(mode_controls_row)
+        self.top_actions_layout.addWidget(self.loading)
+
+        # Kept fully wired (see comments above) but never actually shown -
+        # parented here just so they have a home.
+        self.top_actions_layout.addWidget(self.manual_radio)
+        self.top_actions_layout.addWidget(self.automatic_radio)
+        self.top_actions_layout.addWidget(self.translate_button)
+        self.top_actions_layout.addWidget(self.cancel_button)
+        self.manual_radio.hide()
+        self.automatic_radio.hide()
+        self.translate_button.hide()
+        self.cancel_button.hide()
 
         self.search_panel = SearchReplacePanel(self)
         self.search_panel.setVisible(False)
 
         left_layout = QtWidgets.QVBoxLayout()
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
         left_layout.addWidget(MDivider())
 
         self.image_card_layout = QtWidgets.QVBoxLayout()
@@ -108,6 +166,7 @@ class WorkspaceMixin:
         left_layout.addWidget(self.search_panel)
         left_widget = QtWidgets.QWidget()
         left_widget.setLayout(left_layout)
+        self.left_widget = left_widget
 
         self.central_stack = QtWidgets.QStackedWidget()
 
@@ -137,6 +196,7 @@ class WorkspaceMixin:
         )
         self.central_stack.addWidget(self.drag_browser)
         self.central_stack.addWidget(self.image_viewer)
+        self._create_page_nav_overlay()
 
         central_widget = QtWidgets.QWidget()
         central_layout = QtWidgets.QVBoxLayout(central_widget)
@@ -144,6 +204,10 @@ class WorkspaceMixin:
         central_layout.setContentsMargins(10, 10, 10, 10)
 
         right_layout = QtWidgets.QVBoxLayout()
+        right_layout.setContentsMargins(4, 0, 4, 4)
+        right_layout.setSpacing(4)
+        right_layout.addWidget(MDivider())
+        right_layout.addLayout(self.top_actions_layout)
         right_layout.addWidget(MDivider())
 
         input_layout = QtWidgets.QHBoxLayout()
@@ -505,16 +569,113 @@ class WorkspaceMixin:
         splitter.setStretchFactor(2, 10)
 
         content_layout = QtWidgets.QVBoxLayout()
-        content_layout.addLayout(header_layout)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
         content_layout.addWidget(self.progress_bar)
         content_layout.addWidget(splitter)
 
-        content_layout.setStretchFactor(header_layout, 0)
         content_layout.setStretchFactor(splitter, 1)
 
         content_widget.setLayout(content_layout)
 
         return content_widget
+
+    def _create_page_nav_overlay(self):
+        """Prev/Next page arrows that float over the image viewer instead of
+        taking up permanent layout space, so they stay reachable even with
+        the page list fully collapsed - shown only while hovering the viewer,
+        and only on the side(s) where there's actually another page."""
+        nav_button_style = """
+            QToolButton {
+                background-color: rgba(0, 0, 0, 110);
+                border: none;
+                border-radius: 18px;
+            }
+            QToolButton:hover {
+                background-color: rgba(0, 0, 0, 160);
+            }
+        """
+
+        self.prev_page_button = QtWidgets.QToolButton(self.image_viewer)
+        self.prev_page_button.setIcon(MIcon("arrow-left.svg"))
+        self.prev_page_button.setIconSize(QtCore.QSize(18, 18))
+        self.prev_page_button.setFixedSize(36, 36)
+        self.prev_page_button.setToolTip(self.tr("Previous Page"))
+        self.prev_page_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.prev_page_button.setStyleSheet(nav_button_style)
+        self.prev_page_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.prev_page_button.clicked.connect(lambda: self._navigate_page_via_overlay(-1))
+        self.prev_page_button.hide()
+
+        self.next_page_button = QtWidgets.QToolButton(self.image_viewer)
+        self.next_page_button.setIcon(MIcon("arrow-right.svg"))
+        self.next_page_button.setIconSize(QtCore.QSize(18, 18))
+        self.next_page_button.setFixedSize(36, 36)
+        self.next_page_button.setToolTip(self.tr("Next Page"))
+        self.next_page_button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.next_page_button.setStyleSheet(nav_button_style)
+        self.next_page_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.next_page_button.clicked.connect(lambda: self._navigate_page_via_overlay(1))
+        self.next_page_button.hide()
+
+        self._page_nav_hovering = False
+        self.image_viewer.installEventFilter(self)
+        # Mouse moves over the viewport don't reach the outer QGraphicsView's
+        # own event() (QAbstractScrollArea forwards them internally instead),
+        # so the viewport needs its own filter - this is what re-checks page
+        # bounds while hovering, since switching pages loads the new image on
+        # a background thread and curr_img_idx only updates once that finishes,
+        # a moment after the click (see _navigate_page_via_overlay).
+        self.image_viewer.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        viewer = getattr(self, "image_viewer", None)
+        if viewer is not None and obj is viewer.viewport():
+            if event.type() == QtCore.QEvent.Type.MouseMove:
+                self._update_page_nav_buttons_visibility()
+        elif obj is viewer:
+            event_type = event.type()
+            if event_type == QtCore.QEvent.Type.Resize:
+                self._reposition_page_nav_buttons()
+            elif event_type == QtCore.QEvent.Type.Enter:
+                self._page_nav_hovering = True
+                self._update_page_nav_buttons_visibility()
+            elif event_type == QtCore.QEvent.Type.Leave:
+                self._page_nav_hovering = False
+                self.prev_page_button.hide()
+                self.next_page_button.hide()
+        return super().eventFilter(obj, event)
+
+    def _reposition_page_nav_buttons(self):
+        if not hasattr(self, "prev_page_button"):
+            return
+        margin = 12
+        y = (self.image_viewer.height() - self.prev_page_button.height()) // 2
+        self.prev_page_button.move(margin, y)
+        self.next_page_button.move(
+            self.image_viewer.width() - self.next_page_button.width() - margin, y
+        )
+
+    def _update_page_nav_buttons_visibility(self):
+        if not hasattr(self, "prev_page_button"):
+            return
+        if not self._page_nav_hovering or self.webtoon_mode or len(self.image_files) < 2:
+            self.prev_page_button.hide()
+            self.next_page_button.hide()
+            return
+        self.prev_page_button.setVisible(self.curr_img_idx > 0)
+        self.next_page_button.setVisible(self.curr_img_idx < len(self.image_files) - 1)
+
+    def _navigate_page_via_overlay(self, direction: int):
+        self.image_ctrl.navigate_images(direction)
+        # curr_img_idx only updates once the new page's background load
+        # finishes, a moment after this call returns - recheck a few times
+        # so the buttons catch up even if the mouse stays still after the
+        # click (MouseMove while hovering also triggers this, for the
+        # common case of the user moving towards the other arrow).
+        self._update_page_nav_buttons_visibility()
+        for delay_ms in (120, 350, 700):
+            QtCore.QTimer.singleShot(delay_ms, self._update_page_nav_buttons_visibility)
 
     def create_tool_button(self, text: str = "", svg: str = "", checkable: bool = False):
         if text:
