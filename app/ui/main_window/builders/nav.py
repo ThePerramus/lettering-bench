@@ -239,10 +239,17 @@ class NavRailMixin:
     def _nav_separator():
         # Explicit color instead of MDivider's native sunken line, which is
         # practically invisible in the dark theme (same fix as the tool rail).
-        line = QtWidgets.QFrame()
-        line.setFixedHeight(1)
-        line.setStyleSheet("background-color: #666666; border: none;")
-        return line
+        # Double line, matching the tool rail's group separators.
+        separator = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(separator)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(3)
+        for _ in range(2):
+            line = QtWidgets.QFrame()
+            line.setFixedHeight(1)
+            line.setStyleSheet("background-color: #666666; border: none;")
+            layout.addWidget(line)
+        return separator
 
     def _set_page_list_panel_visible(self, visible: bool):
         left_widget = getattr(self, "left_widget", None)

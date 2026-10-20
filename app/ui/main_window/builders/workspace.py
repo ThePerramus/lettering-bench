@@ -617,14 +617,15 @@ class WorkspaceMixin:
 
         def add_group(buttons, label=None, add_divider_after=True):
             if label:
-                group_label = MLabel(label)
-                group_label.setWordWrap(True)
+                # Plain QLabel: MLabel's theme padding made these labels the
+                # widest thing in the rail, setting its width.
+                group_label = QtWidgets.QLabel(label)
                 group_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
                 group_label.setStyleSheet("font-size: 9px; color: #888;")
                 rail_layout.addWidget(group_label)
                 rail_layout.addSpacing(2)
             for index, button in enumerate(buttons):
-                if not isinstance(button, MSwitch):
+                if not isinstance(button, MSwitch) and not button.property("railKeepSize"):
                     button.setFixedSize(rail_button_size, rail_button_size)
                 # Plain .setIconSize() gets silently overwritten back to the
                 # theme's own size-tier default (qproperty-iconSize in the
@@ -674,9 +675,7 @@ class WorkspaceMixin:
             self.delete_button,
             self.clear_rectangles_button,
             self.draw_blklist_blks,
-            self.change_all_blocks_size_dec,
-            self.change_all_blocks_size_diff,
-            self.change_all_blocks_size_inc,
+            self._make_box_resize_stepper(rail_button_size),
         ), label=self.tr("Box"))
 
         add_group((
@@ -715,6 +714,36 @@ class WorkspaceMixin:
             rail_widget.sizeHint().width() + rail_scroll.verticalScrollBar().sizeHint().width()
         )
         return rail_scroll
+
+    def _make_box_resize_stepper(self, height: int) -> QtWidgets.QWidget:
+        """The grow/shrink-all-boxes amount field with a small arrow on
+        each side, packed into one rail slot instead of three stacked ones.
+        Same widgets (and controller.py wiring) as before, just restyled."""
+        stepper = QtWidgets.QWidget()
+        stepper.setProperty("railKeepSize", True)
+        layout = QtWidgets.QHBoxLayout(stepper)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        for button, svg in (
+            (self.change_all_blocks_size_dec, "chevron_left.svg"),
+            (self.change_all_blocks_size_inc, "chevron_right.svg"),
+        ):
+            button.set_dayu_svg(svg)
+            button.setFixedSize(6, height)
+            # The theme's QSS pins min/max-height per dayu_size, which beats
+            # setFixedSize() - override it in the widget's own stylesheet.
+            button.setStyleSheet(
+                f"MToolButton {{ qproperty-iconSize: 8px 8px; min-height: {height}px; max-height: {height}px; }}"
+            )
+        self.change_all_blocks_size_diff.setFixedSize(14, height)
+        self.change_all_blocks_size_diff.setStyleSheet(
+            f"MLineEdit {{ padding: 0px; margin: 0px; font-size: 9px; min-height: {height - 2}px; max-height: {height - 2}px; }}"
+        )
+        layout.addWidget(self.change_all_blocks_size_dec)
+        layout.addWidget(self.change_all_blocks_size_diff)
+        layout.addWidget(self.change_all_blocks_size_inc)
+        stepper.setFixedSize(26, height)
+        return stepper
 
     def _create_page_nav_overlay(self):
         """Prev/Next page arrows that float over the image viewer instead of
