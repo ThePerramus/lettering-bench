@@ -845,6 +845,7 @@ class ToolStateMixin:
             self.paint_options_widget.setVisible(
                 tool_name in ("brush", "eraser", "pencil", "patch_eraser", "reveal_pencil")
             )
+            self._reposition_canvas_overlays()
 
     def set_brush_eraser_size(self, size: int):
         try:

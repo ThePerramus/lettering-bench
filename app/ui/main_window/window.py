@@ -218,6 +218,7 @@ class ComicTranslateUI(
             self.save_browser,
             self.save_all_button,
             self.search_sidebar_button,
+            self.nav_mode_group,
         ]
         for t in tools:
             if hasattr(t, "setVisible"):

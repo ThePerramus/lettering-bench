@@ -7,7 +7,6 @@ from ...dayu_widgets.browser import (
     MClickSaveFileToolButton,
 )
 from ...dayu_widgets.button_group import MToolButtonGroup
-from ...dayu_widgets.divider import MDivider
 from ...dayu_widgets.menu import MMenu
 from ...dayu_widgets.push_button import MPushButton
 from ...dayu_widgets.qt import MIcon
@@ -17,8 +16,6 @@ from ...dayu_widgets.tool_button import MToolButton
 class NavRailMixin:
     def _create_nav_rail(self):
         nav_rail_layout = QtWidgets.QVBoxLayout()
-        nav_divider = MDivider()
-        nav_divider.setFixedWidth(30)
 
         self.new_project_button = MToolButton()
         self.new_project_button.set_dayu_svg("file.svg")
@@ -197,6 +194,7 @@ class NavRailMixin:
         )
         self.insert_button.clicked.connect(self.insert_browser_button.clicked)
 
+        nav_rail_layout.addWidget(self._nav_group_label(self.tr("File")))
         nav_rail_layout.addWidget(self.new_project_button)
         nav_rail_layout.addWidget(self.tool_browser)
         nav_rail_layout.addWidget(self.insert_button)
@@ -204,14 +202,47 @@ class NavRailMixin:
         nav_rail_layout.addWidget(self.save_as_project_button)
         nav_rail_layout.addWidget(self.save_browser)
         nav_rail_layout.addWidget(self.save_all_button)
-        nav_rail_layout.addWidget(nav_divider)
+
+        nav_rail_layout.addWidget(self._nav_separator())
+        nav_rail_layout.addWidget(self._nav_group_label(self.tr("View")))
         nav_rail_layout.addWidget(self.page_list_toggle_button)
         nav_rail_layout.addWidget(self.search_sidebar_button)
+
+        # Webtoon toggle + Manual/Automatic switch get added to
+        # self.nav_mode_layout later, from _create_main_content (they're
+        # built there, after this rail). Its own widget so the whole group,
+        # label and separator included, hides on the startup screen
+        # (_set_document_tools_visible, window.py).
+        self.nav_mode_group = QtWidgets.QWidget()
+        self.nav_mode_layout = QtWidgets.QVBoxLayout(self.nav_mode_group)
+        self.nav_mode_layout.setContentsMargins(0, 0, 0, 0)
+        self.nav_mode_layout.addWidget(self._nav_separator())
+        self.nav_mode_layout.addWidget(self._nav_group_label(self.tr("Mode")))
+        nav_rail_layout.addWidget(self.nav_mode_group)
+
+        nav_rail_layout.addWidget(self._nav_separator())
+        nav_rail_layout.addWidget(self._nav_group_label(self.tr("Go")))
         nav_rail_layout.addWidget(nav_tool_group)
         nav_rail_layout.addStretch()
         nav_rail_layout.setContentsMargins(0, 0, 0, 0)
 
         return nav_rail_layout
+
+    @staticmethod
+    def _nav_group_label(text: str):
+        label = QtWidgets.QLabel(text)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet("font-size: 9px; color: #888;")
+        return label
+
+    @staticmethod
+    def _nav_separator():
+        # Explicit color instead of MDivider's native sunken line, which is
+        # practically invisible in the dark theme (same fix as the tool rail).
+        line = QtWidgets.QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background-color: #666666; border: none;")
+        return line
 
     def _set_page_list_panel_visible(self, visible: bool):
         left_widget = getattr(self, "left_widget", None)

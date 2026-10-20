@@ -118,20 +118,10 @@ class WorkspaceMixin:
         self.batch_report_button.setEnabled(False)
         self.batch_report_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
-        # Pipeline buttons (+ play/report, Automatic's equivalent) and
-        # webtoon/mode_switch moved into self.tool_rail_widget below -
-        # self.loading is the only thing left in this row, instead of its
-        # own row, so it doesn't add a row that appears/disappears and
-        # shifts everything below it while a long-running step is active.
-        mode_controls_row = QtWidgets.QHBoxLayout()
-        mode_controls_row.addWidget(self.loading)
-        mode_controls_row.addStretch()
-
-        self.top_actions_layout = QtWidgets.QVBoxLayout()
-        self.top_actions_layout.addLayout(mode_controls_row)
-
         # Kept fully wired (see comments above) but never actually shown -
-        # parented here just so they have a home.
+        # parented here just so they have a home (the widget holding this
+        # layout is itself never shown, see right_hidden_widget below).
+        self.top_actions_layout = QtWidgets.QVBoxLayout()
         self.top_actions_layout.addWidget(self.manual_radio)
         self.top_actions_layout.addWidget(self.automatic_radio)
         self.top_actions_layout.addWidget(self.translate_button)
@@ -196,11 +186,7 @@ class WorkspaceMixin:
         central_layout.setContentsMargins(10, 10, 10, 10)
 
         right_layout = QtWidgets.QVBoxLayout()
-        right_layout.setContentsMargins(4, 0, 4, 4)
-        right_layout.setSpacing(4)
-        right_layout.addWidget(MDivider())
         right_layout.addLayout(self.top_actions_layout)
-        right_layout.addWidget(MDivider())
 
         input_layout = QtWidgets.QHBoxLayout()
 
@@ -437,7 +423,7 @@ class WorkspaceMixin:
         self.reveal_pencil_button.setEnabled(False)
         self.tool_buttons["reveal_pencil"] = self.reveal_pencil_button
 
-        self.brush_size_label = MLabel(self.tr("Tool Size (Brush/Eraser/Pencil/Patch Eraser/Reveal Pencil)"))
+        self.brush_size_label = MLabel(self.tr("Tool Size"))
         self.brush_eraser_slider = MSlider()
         self.brush_eraser_slider.setMinimum(1)
         self.brush_eraser_slider.setMaximum(100)
@@ -507,7 +493,7 @@ class WorkspaceMixin:
         self.reference_opacity_slider.setMaximum(100)
         self.reference_opacity_slider.setValue(50)
         self.reference_opacity_slider.setToolTip(self.tr(
-            "Reference Overlay Opacity - Not the Reveal Pencil's Size, See 'Tool Size' Above"))
+            "Reference Overlay Opacity - Not the Reveal Pencil's Size"))
         self.reference_opacity_slider.valueChanged.connect(self.set_reference_opacity)
 
         # "Options bar" for the paint-family tools (brush/eraser/pencil/
@@ -515,13 +501,24 @@ class WorkspaceMixin:
         # active tool (toggled from set_tool() in tools.py), instead of its
         # own permanently-visible collapsible section now that the tool
         # buttons themselves moved to self.tool_rail_widget.
-        self.paint_options_widget = QtWidgets.QWidget()
+        # Floats over the canvas's bottom-right corner (see
+        # _reposition_canvas_overlays) like the Text/Reference panels.
+        self.paint_options_widget = QtWidgets.QWidget(self.central_widget)
+        self.paint_options_widget.setObjectName("paintOptionsFlyout")
+        self.paint_options_widget.setStyleSheet(
+            "QWidget#paintOptionsFlyout { background-color: #2b2b2b; border: 1px solid #555555; border-radius: 4px; }"
+        )
+        self.paint_options_widget.setFixedWidth(240)
         paint_options_layout = QtWidgets.QVBoxLayout(self.paint_options_widget)
-        paint_options_layout.setContentsMargins(0, 0, 0, 0)
+        paint_options_layout.setContentsMargins(8, 6, 8, 6)
         paint_options_layout.addWidget(self.brush_size_label)
         paint_options_layout.addWidget(self.brush_eraser_slider)
         self.paint_options_widget.setVisible(False)
-        self.top_actions_layout.addWidget(self.paint_options_widget)
+
+        # Same for the busy spinner: an overlay at the canvas's top center,
+        # so showing/hiding it never shifts any panel's layout.
+        self.loading.setParent(self.central_widget)
+        self.loading.setVisible(False)
 
         # Floats over the canvas, same as self.text_section_widget above -
         # anchored to the right panel's left edge, below the Text panel if
@@ -545,8 +542,9 @@ class WorkspaceMixin:
         self.reference_section_widget.setVisible(False)
         self._reposition_reference_flyout()
 
-        right_content_widget = QtWidgets.QWidget()
-        right_content_widget.setLayout(right_layout)
+        right_hidden_widget = QtWidgets.QWidget()
+        right_hidden_widget.setLayout(right_layout)
+        right_hidden_widget.setVisible(False)
 
         self.tool_rail_widget = self._create_tool_rail()
 
@@ -554,7 +552,7 @@ class WorkspaceMixin:
         right_outer_layout.setContentsMargins(0, 0, 0, 0)
         right_outer_layout.setSpacing(0)
         right_outer_layout.addWidget(self.tool_rail_widget)
-        right_outer_layout.addWidget(right_content_widget, 1)
+        right_outer_layout.addWidget(right_hidden_widget)
 
         right_widget = QtWidgets.QWidget()
         right_widget.setLayout(right_outer_layout)
@@ -647,10 +645,11 @@ class WorkspaceMixin:
                 rail_layout.addWidget(make_group_separator())
                 rail_layout.addSpacing(4)
 
-        # Webtoon toggle + Manual/Automatic switch, always visible
-        # regardless of mode - first thing in the rail since it governs
-        # everything below it.
-        add_group((self.webtoon_toggle, self.mode_switch), label=self.tr("Ctrl"))
+        # Webtoon toggle + Manual/Automatic switch live in the left nav
+        # rail's "Mode" group instead (it has room to spare).
+        self.webtoon_toggle.set_dayu_size(dayu_theme.default_size)
+        self.nav_mode_layout.addWidget(self.webtoon_toggle)
+        self.nav_mode_layout.addWidget(self.mode_switch, 0, QtCore.Qt.AlignmentFlag.AlignHCenter)
 
         # Manual's 6 pipeline steps and Automatic's play/report share this
         # top slot under one label - only one set is visible at a time
@@ -710,6 +709,11 @@ class WorkspaceMixin:
         rail_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         rail_scroll.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         rail_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        # Fixed to the rail's own width (plus room for its scrollbar) so the
+        # splitter can't squeeze it narrower and clip the icons.
+        rail_scroll.setFixedWidth(
+            rail_widget.sizeHint().width() + rail_scroll.verticalScrollBar().sizeHint().width()
+        )
         return rail_scroll
 
     def _create_page_nav_overlay(self):
@@ -779,7 +783,25 @@ class WorkspaceMixin:
         elif obj is getattr(self, "central_widget", None) and event.type() == QtCore.QEvent.Type.Resize:
             self._reposition_text_flyout()
             self._reposition_reference_flyout()
+            self._reposition_canvas_overlays()
         return super().eventFilter(obj, event)
+
+    def _reposition_canvas_overlays(self):
+        """Busy spinner at the canvas's top center, paint-tool size box at
+        its bottom-right corner."""
+        if not hasattr(self, "paint_options_widget"):
+            return
+        margin = 10
+        w, h = self.central_widget.width(), self.central_widget.height()
+        self.loading.adjustSize()
+        self.loading.move((w - self.loading.width()) // 2, margin)
+        self.loading.raise_()
+        self.paint_options_widget.adjustSize()
+        self.paint_options_widget.move(
+            max(margin, w - self.paint_options_widget.width() - margin),
+            max(margin, h - self.paint_options_widget.height() - margin),
+        )
+        self.paint_options_widget.raise_()
 
     def _reposition_text_flyout(self):
         """Keeps self.text_section_widget flush against the canvas's right
