@@ -11,6 +11,20 @@ from app.ui.messages import Messages
 
 
 class ToolStateMixin:
+    def toggle_text_panel(self):
+        visible = self.text_panel_toggle_button.isChecked()
+        self.text_section_widget.setVisible(visible)
+        if visible:
+            self._reposition_text_flyout()
+            self.text_section_widget.raise_()
+
+    def toggle_reference_panel(self):
+        visible = self.reference_panel_toggle_button.isChecked()
+        self.reference_section_widget.setVisible(visible)
+        if visible:
+            self._reposition_reference_flyout()
+            self.reference_section_widget.raise_()
+
     def toggle_pan_tool(self):
         if self.pan_button.isChecked():
             self.set_tool("pan")
@@ -387,28 +401,47 @@ class ToolStateMixin:
         return any_done
 
     def _sync_hbutton_group_for_reference(self):
-        """Applies the Recognize/Translate reference-page gating, hides the
-        text/style panel, and auto-expands the Reference Page tools section -
-        called on every page switch. Uses Detect's own enabled state as a
-        proxy for "is the manual button group actually active right now" so
-        the button-gating part never fights disable_hbutton_group() while
-        work is in progress, or re-enables anything while Automatic mode has
-        the group disabled."""
+        """Applies the Detect/Recognize/Translate reference-page gating,
+        hides the text/style panel, and auto-expands the Reference Page
+        tools section - called on every page switch. Detect is skippable on
+        a reference page because Segment already runs detection itself when
+        it has no blocks yet (load_segmentation_points, manual_workflow.py)
+        - confirmed to produce the same result as clicking Detect first.
+        Uses Segment's own enabled state (never touched by this gating) as
+        a proxy for "is the manual button group actually active right now"
+        so this never fights disable_hbutton_group() while work is in
+        progress, or re-enables anything while Automatic mode has the group
+        disabled."""
         if not self.image_files:
             return
         buttons = self.hbutton_group.get_button_group().buttons()
         uses_reference = self._page_uses_reference_workflow(self.image_files[self.curr_img_idx])
+        group_active = buttons[3].isEnabled()  # Segment
         if uses_reference:
-            buttons[1].setEnabled(False)
-            buttons[2].setEnabled(False)
-        elif buttons[0].isEnabled():
+            buttons[0].setEnabled(False)  # Detect
+            buttons[1].setEnabled(False)  # Recognize
+            buttons[2].setEnabled(False)  # Translate
+        elif group_active:
+            buttons[0].setEnabled(True)
             buttons[1].setEnabled(True)
             buttons[2].setEnabled(True)
 
         if hasattr(self, "text_section_widget"):
             self.text_section_widget.setVisible(not uses_reference)
-        if hasattr(self, "reference_section_item"):
-            self.reference_section_item.set_expand(uses_reference)
+            if not uses_reference:
+                self._reposition_text_flyout()
+                self.text_section_widget.raise_()
+        if hasattr(self, "text_panel_toggle_button"):
+            with QtCore.QSignalBlocker(self.text_panel_toggle_button):
+                self.text_panel_toggle_button.setChecked(not uses_reference)
+        if hasattr(self, "reference_section_widget"):
+            self.reference_section_widget.setVisible(uses_reference)
+            if uses_reference:
+                self._reposition_reference_flyout()
+                self.reference_section_widget.raise_()
+        if hasattr(self, "reference_panel_toggle_button"):
+            with QtCore.QSignalBlocker(self.reference_panel_toggle_button):
+                self.reference_panel_toggle_button.setChecked(uses_reference)
 
     def render_or_reveal(self):
         """The Render button's handler: for pages using the reference
@@ -807,6 +840,11 @@ class ToolStateMixin:
             for button in self.tool_buttons.values():
                 button.setChecked(False)
             self.image_viewer.setDragMode(QtWidgets.QGraphicsView.DragMode.NoDrag)
+
+        if hasattr(self, "paint_options_widget"):
+            self.paint_options_widget.setVisible(
+                tool_name in ("brush", "eraser", "pencil", "patch_eraser", "reveal_pencil")
+            )
 
     def set_brush_eraser_size(self, size: int):
         try:

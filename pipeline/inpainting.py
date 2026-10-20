@@ -339,7 +339,7 @@ class InpaintingHandler:
             return None, f"background-too-small:{background_pixels.shape[0]}"
 
         masked_ratio = float(np.count_nonzero(masked_region)) / float(np.count_nonzero(masked_region | background_region))
-        if masked_ratio > 0.90:
+        if masked_ratio > 0.95:
             return None, f"masked-ratio-too-high:{masked_ratio:.3f}"
 
         pixels = background_pixels.reshape(-1, 3)

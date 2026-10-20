@@ -814,10 +814,14 @@ class ComicTranslate(ComicTranslateUI):
         for button in buttons:
             button.setEnabled(True)
         # Recognize/Translate have nothing to do on a page that reveals its
-        # text from an aligned reference instead of OCR+translating it -
-        # Detect/Segment/Clean stay enabled either way (finding and clearing
-        # the text is language-agnostic; only Render's meaning changes).
+        # text from an aligned reference instead of OCR+translating it, and
+        # Detect is redundant there too - Segment already runs detection
+        # itself when it has no blocks yet, so clicking Detect first makes
+        # no difference. Segment/Clean stay enabled either way (finding and
+        # clearing the text is language-agnostic; only Render's meaning
+        # changes).
         if self.image_files and self._page_uses_reference_workflow(self.image_files[self.curr_img_idx]):
+            buttons[0].setEnabled(False)  # Detect
             buttons[1].setEnabled(False)  # Recognize
             buttons[2].setEnabled(False)  # Translate
 

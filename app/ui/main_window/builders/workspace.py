@@ -6,7 +6,6 @@ from app.ui.dayu_widgets import dayu_theme
 from app.ui.dayu_widgets.browser import MDragFileButton
 from app.ui.dayu_widgets.button_group import MPushButtonGroup, MToolButtonGroup
 from app.ui.dayu_widgets.check_box import MCheckBox
-from app.ui.dayu_widgets.collapse import MCollapse
 from app.ui.dayu_widgets.combo_box import MComboBox, MFontComboBox
 from app.ui.dayu_widgets.divider import MDivider
 from app.ui.dayu_widgets.label import MLabel
@@ -36,28 +35,32 @@ class WorkspaceMixin:
         ]
         self.undo_tool_group.set_button_list(undo_tools)
 
-        button_config_list = [
-            {"text": self.tr("Detect"), "dayu_type": MPushButton.DefaultType, "enabled": False},
-            {"text": self.tr("Recognize"), "dayu_type": MPushButton.DefaultType, "enabled": False},
-            {"text": self.tr("Translate"), "dayu_type": MPushButton.DefaultType, "enabled": False},
-            {"text": self.tr("Segment"), "dayu_type": MPushButton.DefaultType, "enabled": False},
-            {"text": self.tr("Clean"), "dayu_type": MPushButton.DefaultType, "enabled": False},
-            {"text": self.tr("Render"), "dayu_type": MPushButton.DefaultType, "enabled": False},
+        # Plain MToolButtons (not MPushButtonGroup's own MPushButton) so
+        # they match the flat, borderless look of every other icon in
+        # self.tool_rail_widget instead of standing out with their own
+        # boxed/bordered chrome. self.hbutton_group is kept only as the
+        # QButtonGroup holder every other reference wants via
+        # .get_button_group().buttons()[i] - its own (unused) internal
+        # layout never gets these buttons added to it; they're registered
+        # directly on its QButtonGroup below and live in the rail instead.
+        pipeline_configs = [
+            ("pipeline_detect.svg", self.tr("Detect")),
+            ("pipeline_recognize.svg", self.tr("Recognize")),
+            ("pipeline_translate.svg", self.tr("Translate")),
+            ("pipeline_segment.svg", self.tr("Segment")),
+            ("pipeline_clean.svg", self.tr("Clean")),
+            ("pipeline_render.svg", self.tr("Render")),
         ]
-
-        # MPushButtonGroup only lays its buttons out in a single row/column,
-        # so it's used here purely as the logical QButtonGroup holder (every
-        # other reference to self.hbutton_group just wants
-        # .get_button_group().buttons()[i], regardless of how they're
-        # arranged on screen) - the actual grid below re-parents the same
-        # six button widgets into its own layout.
         self.hbutton_group = MPushButtonGroup()
-        self.hbutton_group.set_dayu_size(dayu_theme.small)
-        self.hbutton_group.set_button_list(button_config_list)
         self.hbutton_group.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-        pipeline_buttons = self.hbutton_group.get_button_group().buttons()
-        for button in pipeline_buttons:
+        pipeline_buttons = []
+        for index, (svg, tooltip) in enumerate(pipeline_configs):
+            button = self.create_tool_button(svg=svg, checkable=False)
+            button.setToolTip(tooltip)
+            button.setEnabled(False)
             button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+            self.hbutton_group.get_button_group().addButton(button, index)
+            pipeline_buttons.append(button)
 
         self.progress_bar = MProgressBar().auto_color()
         self.progress_bar.setValue(0)
@@ -115,33 +118,16 @@ class WorkspaceMixin:
         self.batch_report_button.setEnabled(False)
         self.batch_report_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
 
-        # Pipeline grid on its own - webtoon/mode_switch/play/report are all
-        # one compact row below instead of sharing grid cells with the
-        # pipeline buttons (putting them in the same cells made them stretch
-        # to fill the whole row once the pipeline buttons around them were
-        # hidden).
-        self.top_action_grid = QtWidgets.QGridLayout()
-        self.top_action_grid.setContentsMargins(0, 0, 0, 0)
-        self.top_action_grid.setSpacing(1)
-
-        pipeline_positions = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
-        for button, (row, col) in zip(pipeline_buttons, pipeline_positions):
-            self.top_action_grid.addWidget(button, row, col)
-
-        # self.loading sits in this row (not its own, below) so it doesn't
-        # add a row that appears/disappears and shifts everything below it
-        # while a long-running step is active - in Manual mode this spot is
-        # blank anyway (play/report are Automatic-only).
+        # Pipeline buttons (+ play/report, Automatic's equivalent) and
+        # webtoon/mode_switch moved into self.tool_rail_widget below -
+        # self.loading is the only thing left in this row, instead of its
+        # own row, so it doesn't add a row that appears/disappears and
+        # shifts everything below it while a long-running step is active.
         mode_controls_row = QtWidgets.QHBoxLayout()
-        mode_controls_row.addWidget(self.webtoon_toggle)
-        mode_controls_row.addWidget(self.mode_switch)
         mode_controls_row.addWidget(self.loading)
-        mode_controls_row.addWidget(self.play_stop_button)
-        mode_controls_row.addWidget(self.batch_report_button)
         mode_controls_row.addStretch()
 
         self.top_actions_layout = QtWidgets.QVBoxLayout()
-        self.top_actions_layout.addLayout(self.top_action_grid)
         self.top_actions_layout.addLayout(mode_controls_row)
 
         # Kept fully wired (see comments above) but never actually shown -
@@ -204,6 +190,7 @@ class WorkspaceMixin:
         self._create_page_nav_overlay()
 
         central_widget = QtWidgets.QWidget()
+        self.central_widget = central_widget
         central_layout = QtWidgets.QVBoxLayout(central_widget)
         central_layout.addWidget(self.central_stack)
         central_layout.setContentsMargins(10, 10, 10, 10)
@@ -330,18 +317,28 @@ class WorkspaceMixin:
         text_render_layout.addLayout(outline_settings_layout)
         text_render_layout.addWidget(rendering_divider_bottom)
 
-        # Hidden on reference-workflow pages (toggled from
-        # _sync_hbutton_group_for_reference, tools.py) - Recognize/Translate
-        # are disabled there and Render reveals the reference's own pixels
-        # instead of drawing styled text, so none of this applies.
-        self.text_section_widget = QtWidgets.QWidget()
+        # Floats over the canvas, anchored to the right panel's left edge
+        # (see _reposition_text_flyout below), instead of widening the right
+        # panel itself - a narrow monitor can't spare that width just to
+        # show two text boxes. Hidden on reference-workflow pages (toggled
+        # from _sync_hbutton_group_for_reference, tools.py) - Recognize/
+        # Translate are disabled there and Render reveals the reference's
+        # own pixels instead of drawing styled text, so none of this
+        # applies; also toggled manually from self.text_panel_toggle_button
+        # in the tool rail.
+        self.text_section_widget = QtWidgets.QWidget(self.central_widget)
+        self.text_section_widget.setFixedWidth(320)
+        self.text_section_widget.setStyleSheet(
+            "QWidget#textFlyout { background-color: #2b2b2b; border: 1px solid #555555; border-radius: 4px; }"
+        )
+        self.text_section_widget.setObjectName("textFlyout")
         text_section_layout = QtWidgets.QVBoxLayout(self.text_section_widget)
-        text_section_layout.setContentsMargins(0, 0, 0, 0)
+        text_section_layout.setContentsMargins(8, 8, 8, 8)
         text_section_layout.addLayout(input_layout)
         text_section_layout.addLayout(text_render_layout)
-
-        tools_widget = QtWidgets.QWidget()
-        tools_layout = QtWidgets.QVBoxLayout()
+        self.central_widget.installEventFilter(self)
+        self._reposition_text_flyout()
+        self.text_section_widget.raise_()
 
         # Pan is a general canvas tool (not tied to text/language), so it
         # lives with the other box/canvas tools below instead of its own
@@ -358,9 +355,6 @@ class WorkspaceMixin:
             self.tr("Sets the Source and Target Language on the current page for all pages")
         )
         text_section_layout.addWidget(self.set_all_button)
-
-        box_tools_lay = QtWidgets.QHBoxLayout()
-        box_tools_lay.addWidget(self.pan_button)
 
         self.box_button = self.create_tool_button(svg="select.svg", checkable=True)
         self.box_button.setToolTip(self.tr("Draw or Select Text Boxes"))
@@ -381,32 +375,27 @@ class WorkspaceMixin:
             )
         )
 
-        box_tools_lay.addWidget(self.box_button)
-        box_tools_lay.addWidget(self.delete_button)
-        box_tools_lay.addWidget(self.clear_rectangles_button)
-        box_tools_lay.addWidget(self.draw_blklist_blks)
-
+        # All three move to self.tool_rail_widget (Box group), stacked
+        # vertically to fit its width - dec/inc grow or shrink every text
+        # block's box by the amount in the field next to them (e.g. if
+        # boxes are consistently a bit tight/loose across the whole page).
         self.change_all_blocks_size_dec = self.create_tool_button(svg="minus_line.svg")
-        self.change_all_blocks_size_dec.setToolTip(self.tr("Reduce the size of all blocks"))
+        self.change_all_blocks_size_dec.setToolTip(
+            self.tr("Shrink every text block's box by the amount below"))
 
         self.change_all_blocks_size_diff = MLineEdit()
         self.change_all_blocks_size_diff.setFixedWidth(30)
         self.change_all_blocks_size_diff.setText("3")
+        self.change_all_blocks_size_diff.setToolTip(
+            self.tr("Amount (px) the -/+ buttons grow or shrink every text block's box by"))
 
         int_validator = QIntValidator()
         self.change_all_blocks_size_diff.setValidator(int_validator)
         self.change_all_blocks_size_diff.setAlignment(QtCore.Qt.AlignCenter)
 
         self.change_all_blocks_size_inc = self.create_tool_button(svg="add_line.svg")
-        self.change_all_blocks_size_inc.setToolTip(self.tr("Increase the size of all blocks"))
-
-        box_tools_lay.addStretch()
-        box_tools_lay.addWidget(self.change_all_blocks_size_dec)
-        box_tools_lay.addWidget(self.change_all_blocks_size_diff)
-        box_tools_lay.addWidget(self.change_all_blocks_size_inc)
-        box_tools_lay.addStretch()
-
-        inp_tools_lay = QtWidgets.QHBoxLayout()
+        self.change_all_blocks_size_inc.setToolTip(
+            self.tr("Grow every text block's box by the amount below"))
 
         self.brush_button = self.create_tool_button(svg="brush-fill.svg", checkable=True)
         self.brush_button.setToolTip(self.tr("Draw Brush Strokes for Cleaning Image"))
@@ -447,15 +436,6 @@ class WorkspaceMixin:
         self.reveal_pencil_button.clicked.connect(self.toggle_reveal_pencil_tool)
         self.reveal_pencil_button.setEnabled(False)
         self.tool_buttons["reveal_pencil"] = self.reveal_pencil_button
-
-        inp_tools_lay.addWidget(self.brush_button)
-        inp_tools_lay.addWidget(self.eraser_button)
-        inp_tools_lay.addWidget(self.clear_brush_strokes_button)
-        inp_tools_lay.addWidget(self.eyedropper_button)
-        inp_tools_lay.addWidget(self.pencil_button)
-        inp_tools_lay.addWidget(self.patch_eraser_button)
-        inp_tools_lay.addWidget(self.reveal_pencil_button)
-        inp_tools_lay.addStretch()
 
         self.brush_size_label = MLabel(self.tr("Tool Size (Brush/Eraser/Pencil/Patch Eraser/Reveal Pencil)"))
         self.brush_eraser_slider = MSlider()
@@ -503,8 +483,6 @@ class WorkspaceMixin:
             "have no counterpart in the reference book at all"))
         self.reference_excluded_checkbox.stateChanged.connect(self.toggle_reference_page_excluded)
 
-        ref_tools_lay = QtWidgets.QHBoxLayout()
-
         self.load_reference_button = self.create_tool_button(svg="ion--image-outline.svg", checkable=True)
         self.load_reference_button.setToolTip(self.tr(
             "Overlay This Page's Reference (from the Book Above, or Pick One) and Drag its Corners to Align It"))
@@ -523,11 +501,6 @@ class WorkspaceMixin:
         self.reset_reference_button.clicked.connect(self.reset_reference_alignment)
         self.reset_reference_button.setEnabled(False)
 
-        ref_tools_lay.addWidget(self.load_reference_button)
-        ref_tools_lay.addWidget(self.confirm_reference_button)
-        ref_tools_lay.addWidget(self.reset_reference_button)
-        ref_tools_lay.addStretch()
-
         self.reference_opacity_label = MLabel(self.tr("Reference Overlay Opacity (While Aligning Only)"))
         self.reference_opacity_slider = MSlider()
         self.reference_opacity_slider.setMinimum(0)
@@ -537,64 +510,59 @@ class WorkspaceMixin:
             "Reference Overlay Opacity - Not the Reveal Pencil's Size, See 'Tool Size' Above"))
         self.reference_opacity_slider.valueChanged.connect(self.set_reference_opacity)
 
-        box_section_widget = QtWidgets.QWidget()
-        box_section_layout = QtWidgets.QVBoxLayout(box_section_widget)
-        box_section_layout.setContentsMargins(0, 0, 0, 0)
-        box_section_layout.addLayout(box_tools_lay)
+        # "Options bar" for the paint-family tools (brush/eraser/pencil/
+        # patch eraser/reveal pencil) - shown only while one of them is the
+        # active tool (toggled from set_tool() in tools.py), instead of its
+        # own permanently-visible collapsible section now that the tool
+        # buttons themselves moved to self.tool_rail_widget.
+        self.paint_options_widget = QtWidgets.QWidget()
+        paint_options_layout = QtWidgets.QVBoxLayout(self.paint_options_widget)
+        paint_options_layout.setContentsMargins(0, 0, 0, 0)
+        paint_options_layout.addWidget(self.brush_size_label)
+        paint_options_layout.addWidget(self.brush_eraser_slider)
+        self.paint_options_widget.setVisible(False)
+        self.top_actions_layout.addWidget(self.paint_options_widget)
 
-        inpainting_section_widget = QtWidgets.QWidget()
-        inpainting_section_layout = QtWidgets.QVBoxLayout(inpainting_section_widget)
-        inpainting_section_layout.setContentsMargins(0, 0, 0, 0)
-        inpainting_section_layout.addLayout(inp_tools_lay)
-        inpainting_section_layout.addWidget(self.brush_size_label)
-        inpainting_section_layout.addWidget(self.brush_eraser_slider)
-
-        reference_section_widget = QtWidgets.QWidget()
-        reference_section_layout = QtWidgets.QVBoxLayout(reference_section_widget)
-        reference_section_layout.setContentsMargins(0, 0, 0, 0)
+        # Floats over the canvas, same as self.text_section_widget above -
+        # anchored to the right panel's left edge, below the Text panel if
+        # both happen to be open. Hidden by default; shown via
+        # self.reference_panel_toggle_button (tool rail, Ref group) or
+        # automatically on reference-workflow pages
+        # (_sync_hbutton_group_for_reference, tools.py).
+        self.reference_section_widget = QtWidgets.QWidget(self.central_widget)
+        self.reference_section_widget.setFixedWidth(320)
+        self.reference_section_widget.setStyleSheet(
+            "QWidget#referenceFlyout { background-color: #2b2b2b; border: 1px solid #555555; border-radius: 4px; }"
+        )
+        self.reference_section_widget.setObjectName("referenceFlyout")
+        reference_section_layout = QtWidgets.QVBoxLayout(self.reference_section_widget)
+        reference_section_layout.setContentsMargins(8, 8, 8, 8)
         reference_section_layout.addLayout(ref_book_lay)
         reference_section_layout.addLayout(ref_preview_lay)
         reference_section_layout.addWidget(self.reference_excluded_checkbox)
-        reference_section_layout.addLayout(ref_tools_lay)
         reference_section_layout.addWidget(self.reference_opacity_label)
         reference_section_layout.addWidget(self.reference_opacity_slider)
+        self.reference_section_widget.setVisible(False)
+        self._reposition_reference_flyout()
 
-        # Collapsible instead of one permanently-expanded column of
-        # dividers - Reference Page in particular only matters for comics
-        # using that workflow, so it starts closed (auto-opened per page by
-        # _sync_hbutton_group_for_reference in tools.py, which also hides
-        # self.text_section_widget above while a reference page is active).
-        self.tools_collapse = MCollapse()
-        self.tools_collapse.add_section_list([
-            {"title": self.tr("Box Drawing"), "widget": box_section_widget, "expand": True},
-            {"title": self.tr("Inpainting"), "widget": inpainting_section_widget, "expand": True},
-            {"title": self.tr("Reference Page (Align a Second Scan)"), "widget": reference_section_widget, "expand": False},
-        ])
-        self.reference_section_item = self.tools_collapse._section_list[2]
+        right_content_widget = QtWidgets.QWidget()
+        right_content_widget.setLayout(right_layout)
 
-        tools_layout.addWidget(self.tools_collapse)
-        tools_layout.addStretch()
-        tools_widget.setLayout(tools_layout)
+        self.tool_rail_widget = self._create_tool_rail()
 
-        tools_scroll = QtWidgets.QScrollArea()
-        tools_scroll.setWidgetResizable(True)
-        tools_scroll.setWidget(tools_widget)
-        tools_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        tools_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        tools_scroll.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
-
-        right_layout.addWidget(self.text_section_widget)
-        right_layout.addWidget(tools_scroll, 1)
+        right_outer_layout = QtWidgets.QHBoxLayout()
+        right_outer_layout.setContentsMargins(0, 0, 0, 0)
+        right_outer_layout.setSpacing(0)
+        right_outer_layout.addWidget(self.tool_rail_widget)
+        right_outer_layout.addWidget(right_content_widget, 1)
 
         right_widget = QtWidgets.QWidget()
-        right_widget.setLayout(right_layout)
+        right_widget.setLayout(right_outer_layout)
 
         splitter = QtWidgets.QSplitter()
         splitter.addWidget(left_widget)
         splitter.addWidget(central_widget)
         splitter.addWidget(right_widget)
-
-        right_widget.setMinimumWidth(240)
 
         splitter.setStretchFactor(0, 40)
         splitter.setStretchFactor(1, 80)
@@ -611,6 +579,138 @@ class WorkspaceMixin:
         content_widget.setLayout(content_layout)
 
         return content_widget
+
+    def _create_tool_rail(self) -> QtWidgets.QWidget:
+        """Narrow, always-visible column of the right panel's icon-only
+        tools (pan/box/inpainting/reference-alignment) - keeps a portrait
+        monitor's right panel from needing the width those used to take up
+        as horizontal rows inside the Box Drawing/Inpainting/Reference Page
+        sections. Sliders, combos and the reference preview thumbnail can't
+        fit a column like this (a tooltip can't host a draggable control),
+        so they're left where they already are for now."""
+        rail_button_size = 24
+        rail_button_spacing = 0
+
+        rail_widget = QtWidgets.QWidget()
+        rail_layout = QtWidgets.QVBoxLayout(rail_widget)
+        rail_layout.setContentsMargins(2, 4, 2, 4)
+        rail_layout.setSpacing(0)
+        rail_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
+
+        def make_divider_line():
+            # MDivider's HLine relies on Qt's native sunken-groove shadow
+            # effect, which depends on light/dark palette roles that barely
+            # differ from the background in this dark theme - practically
+            # invisible here regardless of how many are stacked. An explicit
+            # background color always shows up.
+            line = QtWidgets.QFrame()
+            line.setFixedHeight(1)
+            line.setStyleSheet("background-color: #666666; border: none;")
+            return line
+
+        def make_group_separator():
+            separator_widget = QtWidgets.QWidget()
+            separator_layout = QtWidgets.QVBoxLayout(separator_widget)
+            separator_layout.setContentsMargins(0, 0, 0, 0)
+            separator_layout.setSpacing(3)
+            separator_layout.addWidget(make_divider_line())
+            separator_layout.addWidget(make_divider_line())
+            return separator_widget
+
+        def add_group(buttons, label=None, add_divider_after=True):
+            if label:
+                group_label = MLabel(label)
+                group_label.setWordWrap(True)
+                group_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+                group_label.setStyleSheet("font-size: 9px; color: #888;")
+                rail_layout.addWidget(group_label)
+                rail_layout.addSpacing(2)
+            for index, button in enumerate(buttons):
+                if not isinstance(button, MSwitch):
+                    button.setFixedSize(rail_button_size, rail_button_size)
+                # Plain .setIconSize() gets silently overwritten back to the
+                # theme's own size-tier default (qproperty-iconSize in the
+                # global stylesheet) the first time the button is actually
+                # shown - confirmed with a throwaway script, not a guess. A
+                # per-widget stylesheet rule for the same property wins the
+                # cascade and actually sticks. Close to the button's own
+                # size, not just "big enough to see" - the real driver of
+                # how separated icons look is this padding inside each
+                # button, not the (already near-zero) layout spacing.
+                if isinstance(button, MToolButton):
+                    button.setStyleSheet("MToolButton { qproperty-iconSize: 19px 19px; }")
+                if index > 0:
+                    rail_layout.addSpacing(rail_button_spacing)
+                rail_layout.addWidget(button)
+            if add_divider_after:
+                rail_layout.addSpacing(4)
+                rail_layout.addWidget(make_group_separator())
+                rail_layout.addSpacing(4)
+
+        # Webtoon toggle + Manual/Automatic switch, always visible
+        # regardless of mode - first thing in the rail since it governs
+        # everything below it.
+        add_group((self.webtoon_toggle, self.mode_switch), label=self.tr("Ctrl"))
+
+        # Manual's 6 pipeline steps and Automatic's play/report share this
+        # top slot under one label - only one set is visible at a time
+        # (toggled by batch_mode_selected/manual_mode_selected in
+        # controller.py, same widgets as before, just living here now
+        # instead of a 2x3 grid).
+        add_group(self.hbutton_group.get_button_group().buttons(), label=self.tr("Steps"), add_divider_after=False)
+        add_group((self.play_stop_button, self.batch_report_button))
+
+        # Manual show/hide for the floating Text panel (self.text_section_widget,
+        # see its construction above) - independent of the automatic hide/show
+        # that already happens on reference-workflow pages (tools.py).
+        self.text_panel_toggle_button = self.create_tool_button(svg="text_panel.svg", checkable=True)
+        self.text_panel_toggle_button.setToolTip(self.tr("Show/Hide Text Panel"))
+        self.text_panel_toggle_button.setChecked(True)
+        self.text_panel_toggle_button.clicked.connect(self.toggle_text_panel)
+        add_group((self.text_panel_toggle_button,), label=self.tr("Text"))
+
+        add_group((
+            self.pan_button,
+            self.box_button,
+            self.delete_button,
+            self.clear_rectangles_button,
+            self.draw_blklist_blks,
+            self.change_all_blocks_size_dec,
+            self.change_all_blocks_size_diff,
+            self.change_all_blocks_size_inc,
+        ), label=self.tr("Box"))
+
+        add_group((
+            self.brush_button,
+            self.eraser_button,
+            self.clear_brush_strokes_button,
+            self.eyedropper_button,
+            self.pencil_button,
+            self.patch_eraser_button,
+            self.reveal_pencil_button,
+        ), label=self.tr("Paint"))
+
+        self.reference_panel_toggle_button = self.create_tool_button(svg="panel_toggle.svg", checkable=True)
+        self.reference_panel_toggle_button.setToolTip(self.tr("Show/Hide Reference Page Panel"))
+        self.reference_panel_toggle_button.clicked.connect(self.toggle_reference_panel)
+        add_group((
+            self.reference_panel_toggle_button,
+            self.load_reference_button,
+            self.confirm_reference_button,
+            self.reset_reference_button,
+        ), label=self.tr("Ref"), add_divider_after=False)
+
+        # Scrollable so a future addition (or a short window on a landscape
+        # monitor) gets its own scrollbar instead of overflowing the window
+        # or pushing the rest of the right panel around.
+        rail_scroll = QtWidgets.QScrollArea()
+        rail_scroll.setWidgetResizable(True)
+        rail_scroll.setWidget(rail_widget)
+        rail_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        rail_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        rail_scroll.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        rail_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        return rail_scroll
 
     def _create_page_nav_overlay(self):
         """Prev/Next page arrows that float over the image viewer instead of
@@ -676,7 +776,37 @@ class WorkspaceMixin:
                 self._page_nav_hovering = False
                 self.prev_page_button.hide()
                 self.next_page_button.hide()
+        elif obj is getattr(self, "central_widget", None) and event.type() == QtCore.QEvent.Type.Resize:
+            self._reposition_text_flyout()
+            self._reposition_reference_flyout()
         return super().eventFilter(obj, event)
+
+    def _reposition_text_flyout(self):
+        """Keeps self.text_section_widget flush against the canvas's right
+        edge (i.e. the right panel's left edge), near the top - sized to
+        its own content instead of stretched to the canvas's full height,
+        which left a mostly-empty panel below the actual controls."""
+        if not hasattr(self, "text_section_widget"):
+            return
+        margin = 10
+        self.text_section_widget.adjustSize()
+        x = self.central_widget.width() - self.text_section_widget.width() - margin
+        self.text_section_widget.move(max(margin, x), margin)
+
+    def _reposition_reference_flyout(self):
+        """Same idea as _reposition_text_flyout - flush against the right
+        panel's left edge, stacked below the Text panel if that one is
+        also currently visible, otherwise at the same top margin."""
+        if not hasattr(self, "reference_section_widget"):
+            return
+        margin = 10
+        self.reference_section_widget.adjustSize()
+        x = self.central_widget.width() - self.reference_section_widget.width() - margin
+        y = margin
+        text_widget = getattr(self, "text_section_widget", None)
+        if text_widget is not None and text_widget.isVisible():
+            y = text_widget.y() + text_widget.height() + margin
+        self.reference_section_widget.move(max(margin, x), y)
 
     def _reposition_page_nav_buttons(self):
         if not hasattr(self, "prev_page_button"):
