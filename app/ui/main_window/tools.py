@@ -11,13 +11,19 @@ from app.ui.messages import Messages
 
 
 class ToolStateMixin:
+    # Closing one of the floating panels by hand is remembered, so the
+    # automatic show/hide in _sync_hbutton_group_for_reference (which runs
+    # on every page switch, alignment confirm, etc.) doesn't keep popping
+    # it back open - only reopening it by hand does.
     def toggle_text_panel(self):
         visible = self.text_panel_toggle_button.isChecked()
+        self._text_panel_user_closed = not visible
         self.text_section_widget.setVisible(visible)
         self._reposition_canvas_overlays()
 
     def toggle_reference_panel(self):
         visible = self.reference_panel_toggle_button.isChecked()
+        self._reference_panel_user_closed = not visible
         self.reference_section_widget.setVisible(visible)
         self._reposition_canvas_overlays()
 
@@ -422,22 +428,18 @@ class ToolStateMixin:
             buttons[1].setEnabled(True)
             buttons[2].setEnabled(True)
 
+        show_text = not uses_reference and not getattr(self, "_text_panel_user_closed", False)
+        show_reference = uses_reference and not getattr(self, "_reference_panel_user_closed", False)
         if hasattr(self, "text_section_widget"):
-            self.text_section_widget.setVisible(not uses_reference)
-            if not uses_reference:
-                self._reposition_text_flyout()
-                self.text_section_widget.raise_()
+            self.text_section_widget.setVisible(show_text)
         if hasattr(self, "text_panel_toggle_button"):
             with QtCore.QSignalBlocker(self.text_panel_toggle_button):
-                self.text_panel_toggle_button.setChecked(not uses_reference)
+                self.text_panel_toggle_button.setChecked(show_text)
         if hasattr(self, "reference_section_widget"):
-            self.reference_section_widget.setVisible(uses_reference)
-            if uses_reference:
-                self._reposition_reference_flyout()
-                self.reference_section_widget.raise_()
+            self.reference_section_widget.setVisible(show_reference)
         if hasattr(self, "reference_panel_toggle_button"):
             with QtCore.QSignalBlocker(self.reference_panel_toggle_button):
-                self.reference_panel_toggle_button.setChecked(uses_reference)
+                self.reference_panel_toggle_button.setChecked(show_reference)
         self._reposition_canvas_overlays()
 
     def render_or_reveal(self):
