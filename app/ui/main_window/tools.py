@@ -14,16 +14,12 @@ class ToolStateMixin:
     def toggle_text_panel(self):
         visible = self.text_panel_toggle_button.isChecked()
         self.text_section_widget.setVisible(visible)
-        if visible:
-            self._reposition_text_flyout()
-            self.text_section_widget.raise_()
+        self._reposition_canvas_overlays()
 
     def toggle_reference_panel(self):
         visible = self.reference_panel_toggle_button.isChecked()
         self.reference_section_widget.setVisible(visible)
-        if visible:
-            self._reposition_reference_flyout()
-            self.reference_section_widget.raise_()
+        self._reposition_canvas_overlays()
 
     def toggle_pan_tool(self):
         if self.pan_button.isChecked():
@@ -442,6 +438,7 @@ class ToolStateMixin:
         if hasattr(self, "reference_panel_toggle_button"):
             with QtCore.QSignalBlocker(self.reference_panel_toggle_button):
                 self.reference_panel_toggle_button.setChecked(uses_reference)
+        self._reposition_canvas_overlays()
 
     def render_or_reveal(self):
         """The Render button's handler: for pages using the reference

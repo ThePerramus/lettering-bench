@@ -501,8 +501,8 @@ class WorkspaceMixin:
         # active tool (toggled from set_tool() in tools.py), instead of its
         # own permanently-visible collapsible section now that the tool
         # buttons themselves moved to self.tool_rail_widget.
-        # Floats over the canvas's bottom-right corner (see
-        # _reposition_canvas_overlays) like the Text/Reference panels.
+        # Floats over the canvas, stacked under the Text/Reference panels
+        # (see _reposition_canvas_overlays).
         self.paint_options_widget = QtWidgets.QWidget(self.central_widget)
         self.paint_options_widget.setObjectName("paintOptionsFlyout")
         self.paint_options_widget.setStyleSheet(
@@ -816,48 +816,35 @@ class WorkspaceMixin:
         return super().eventFilter(obj, event)
 
     def _reposition_canvas_overlays(self):
-        """Busy spinner at the canvas's top center, paint-tool size box at
-        its bottom-right corner."""
-        if not hasattr(self, "paint_options_widget"):
+        """Busy spinner at the canvas's top center. The floating panels
+        (Text, Reference Page, paint-tool size) stack down the canvas's
+        right edge, flush against the tool rail, in that order - each one
+        only taking space while it's actually shown, so none overlaps
+        another and the size box sits right under whichever is open."""
+        if not hasattr(self, "central_widget"):
             return
         margin = 10
-        w, h = self.central_widget.width(), self.central_widget.height()
-        self.loading.adjustSize()
-        self.loading.move((w - self.loading.width()) // 2, margin)
-        self.loading.raise_()
-        self.paint_options_widget.adjustSize()
-        self.paint_options_widget.move(
-            max(margin, w - self.paint_options_widget.width() - margin),
-            max(margin, h - self.paint_options_widget.height() - margin),
-        )
-        self.paint_options_widget.raise_()
+        w = self.central_widget.width()
+        if hasattr(self, "loading"):
+            self.loading.adjustSize()
+            self.loading.move((w - self.loading.width()) // 2, margin)
+            self.loading.raise_()
+        y = margin
+        for name in ("text_section_widget", "reference_section_widget", "paint_options_widget"):
+            panel = getattr(self, name, None)
+            if panel is None:
+                continue
+            panel.adjustSize()
+            panel.move(max(margin, w - panel.width() - margin), y)
+            panel.raise_()
+            if panel.isVisibleTo(self.central_widget):
+                y += panel.height() + margin
 
     def _reposition_text_flyout(self):
-        """Keeps self.text_section_widget flush against the canvas's right
-        edge (i.e. the right panel's left edge), near the top - sized to
-        its own content instead of stretched to the canvas's full height,
-        which left a mostly-empty panel below the actual controls."""
-        if not hasattr(self, "text_section_widget"):
-            return
-        margin = 10
-        self.text_section_widget.adjustSize()
-        x = self.central_widget.width() - self.text_section_widget.width() - margin
-        self.text_section_widget.move(max(margin, x), margin)
+        self._reposition_canvas_overlays()
 
     def _reposition_reference_flyout(self):
-        """Same idea as _reposition_text_flyout - flush against the right
-        panel's left edge, stacked below the Text panel if that one is
-        also currently visible, otherwise at the same top margin."""
-        if not hasattr(self, "reference_section_widget"):
-            return
-        margin = 10
-        self.reference_section_widget.adjustSize()
-        x = self.central_widget.width() - self.reference_section_widget.width() - margin
-        y = margin
-        text_widget = getattr(self, "text_section_widget", None)
-        if text_widget is not None and text_widget.isVisible():
-            y = text_widget.y() + text_widget.height() + margin
-        self.reference_section_widget.move(max(margin, x), y)
+        self._reposition_canvas_overlays()
 
     def _reposition_page_nav_buttons(self):
         if not hasattr(self, "prev_page_button"):
