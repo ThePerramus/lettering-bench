@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 FAST_FILL_BUBBLE_INSET = 7
 FAST_FILL_UNIFORM_COLOR_TOLERANCE = 12
 FAST_FILL_MIN_UNIFORM_COVERAGE = 0.94
+# Paper grain / JPEG speckle in a scanned white bubble sits 13-27 levels off
+# its median - enough to fail the strict tolerance, far below real artwork.
+# Only for paper-light backgrounds: dark artwork (brush strokes, shading) has
+# low absolute contrast and would pass the loose tolerance too.
+FAST_FILL_LOOSE_COLOR_TOLERANCE = 32
+FAST_FILL_MIN_LOOSE_COVERAGE = 0.98
+FAST_FILL_LOOSE_MIN_BRIGHTNESS = 200
 
 
 def call_inpaint_image(inpainting_handler, image: np.ndarray, mask: np.ndarray, config, blk_list: list | None = None):
@@ -338,9 +345,12 @@ class InpaintingHandler:
         if background_pixels.shape[0] < 64:
             return None, f"background-too-small:{background_pixels.shape[0]}"
 
-        masked_ratio = float(np.count_nonzero(masked_region)) / float(np.count_nonzero(masked_region | background_region))
-        if masked_ratio > 0.95:
-            return None, f"masked-ratio-too-high:{masked_ratio:.3f}"
+        # No masked-vs-background ratio gate here: Segment's mask covers
+        # nearly a whole bubble's interior, not just its glyphs, so 95-98%
+        # masked is normal for every bubble and the gate rejected most of
+        # them. The real guard against flat-filling a textured/gradient
+        # bubble is _is_fast_fill_bubble_background_uniform (already passed
+        # before this runs) plus the cluster coverage/spread checks below.
 
         pixels = background_pixels.reshape(-1, 3)
         pixels_u16 = pixels.astype(np.uint16)
@@ -438,13 +448,18 @@ class InpaintingHandler:
         # First use a halo to remove antialiased glyph edges from the normal
         # bubble-wide sample.
         binary_mask = (crop_mask > 0).astype(np.uint8)
-        mask_halo = imk.dilate(
-            binary_mask,
-            np.ones((5, 5), np.uint8),
-            iterations=2,
-        ) > 0
-        sample_region = bubble_mask & ~mask_halo
-        sample_count = int(np.count_nonzero(sample_region))
+        # A small bubble can lose almost its whole visible rim to the wide
+        # halo - retry with a thinner one before giving up on a flat fill.
+        for kernel, iterations in ((5, 2), (3, 1)):
+            mask_halo = imk.dilate(
+                binary_mask,
+                np.ones((kernel, kernel), np.uint8),
+                iterations=iterations,
+            ) > 0
+            sample_region = bubble_mask & ~mask_halo
+            sample_count = int(np.count_nonzero(sample_region))
+            if sample_count >= 64:
+                break
         if sample_count < 64:
             return False, f"bubble-background-too-small:{sample_count}"
 
@@ -456,7 +471,19 @@ class InpaintingHandler:
         )
         uniform_coverage = float(np.count_nonzero(close_to_median)) / float(sample_count)
         if uniform_coverage < FAST_FILL_MIN_UNIFORM_COVERAGE:
-            return False, f"bubble-background-nonuniform:coverage={uniform_coverage:.3f}"
+            loosely_close = np.all(
+                np.abs(pixels - median) <= FAST_FILL_LOOSE_COLOR_TOLERANCE,
+                axis=1,
+            )
+            loose_coverage = float(np.count_nonzero(loosely_close)) / float(sample_count)
+            if (
+                loose_coverage < FAST_FILL_MIN_LOOSE_COVERAGE
+                or float(np.min(median)) < FAST_FILL_LOOSE_MIN_BRIGHTNESS
+            ):
+                return False, (
+                    "bubble-background-nonuniform:"
+                    f"coverage={uniform_coverage:.3f},loose={loose_coverage:.3f}"
+                )
 
         bubble_ys, bubble_xs = np.nonzero(bubble_mask)
         if bubble_ys.size and bubble_xs.size:
