@@ -15,6 +15,9 @@ from .webtoons.webtoon_manager import LazyWebtoonManager
 from .interaction_manager import InteractionManager
 from .event_handler import EventHandler
 
+# Extra scrollable space around a page, as a fraction of its longest side.
+PAGE_SCROLL_MARGIN = 1.0
+
 
 class ImageViewer(QGraphicsView):
     # Signals
@@ -151,7 +154,9 @@ class ImageViewer(QGraphicsView):
         elif self.hasPhoto():
             rect = self.photo.boundingRect()
             if not rect.isNull():
-                self.setSceneRect(rect)
+                # Margin first: it brings in the scrollbars, which shrink the
+                # viewport the fit is measured against.
+                self._apply_page_scroll_margin()
                 unity = self.transform().mapRect(QRectF(0, 0, 1, 1))
                 self.scale(1 / unity.width(), 1 / unity.height())
                 viewrect = self.viewport().rect()
@@ -160,6 +165,22 @@ class ImageViewer(QGraphicsView):
                              viewrect.height() / scenerect.height())
                 self.scale(factor, factor)
                 self.centerOn(rect.center())
+
+    def _apply_page_scroll_margin(self):
+        """Let the wheel/scrollbars move the page partly off-screen.
+
+        With the view's scene rect equal to the page, a fully visible page is
+        locked in the centre, under the floating panels (Text, Reference
+        Page). Only the view's rect grows - the scene's own rect, which text
+        boxes and rectangles use as their drag limits, stays the page.
+        """
+        if self.webtoon_mode or not self.hasPhoto():
+            return
+        rect = self.photo.boundingRect()
+        if rect.isNull():
+            return
+        margin = max(rect.width(), rect.height()) * PAGE_SCROLL_MARGIN
+        self.setSceneRect(rect.adjusted(-margin, -margin, margin, margin))
 
     def set_tool(self, tool: str):
         self.current_tool = tool
@@ -610,6 +631,8 @@ class ImageViewer(QGraphicsView):
         scene_rect = state.get('scene_rect')
         if scene_rect:
             self.setSceneRect(QRectF(*scene_rect))
+        # Pages saved before the scroll margin existed restore a page-tight rect.
+        self._apply_page_scroll_margin()
 
         transform = state.get('transform')
         if transform:

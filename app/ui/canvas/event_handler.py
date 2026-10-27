@@ -6,6 +6,12 @@ from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsPathItem
 from .text_item import TextBlockItem, TextBlockState
 from .rectangle import MoveableRectItem, RectState
 
+# Mouse-wheel scrolling of a single page: pixels per wheel notch, and how long
+# each notch takes to glide there. Qt's default jumps ~viewport/20 * 3 lines
+# per notch in one go (~270px on a tall monitor).
+WHEEL_SCROLL_STEP = 90
+WHEEL_SCROLL_DURATION_MS = 120
+
 
 class EventHandler:
     """Handles all Qt events for the ImageViewer using composition."""
@@ -21,6 +27,11 @@ class EventHandler:
         self._nudge_target = None
         self._nudge_old_state = None
         self._nudge_timer = None
+
+        # Smooth wheel scrolling: one animation per scrollbar, retargeted
+        # (not restarted from scratch) when notches arrive mid-glide.
+        self._wheel_animations = {}
+        self._wheel_targets = {}
     
     # Main Event Handlers
 
@@ -214,13 +225,45 @@ class EventHandler:
             factor = 1.25 if event.angleDelta().y() > 0 else 1 / 1.25
             self.viewer.scale(factor, factor)
             self.viewer.zoom += 1 if factor > 1 else -1
+        elif not self.viewer.webtoon_mode and event.pixelDelta().isNull():
+            self._smooth_wheel_scroll(event)
         else:
-            # Call QGraphicsView's wheelEvent directly
+            # Touchpads (pixelDelta) already scroll smoothly; webtoon mode
+            # keeps Qt's own scrolling for its lazy loader.
             QtWidgets.QGraphicsView.wheelEvent(self.viewer, event)
             
             # Handle lazy webtoon manager scroll events
             if self.viewer.webtoon_mode:
                 self.viewer.webtoon_manager.on_scroll()
+
+    def _smooth_wheel_scroll(self, event: QtGui.QWheelEvent):
+        delta = event.angleDelta()
+        horizontal = (
+            event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+            or abs(delta.x()) > abs(delta.y())
+        )
+        notches = (delta.y() or delta.x()) / 120.0
+        bar = self.viewer.horizontalScrollBar() if horizontal else self.viewer.verticalScrollBar()
+        key = 'h' if horizontal else 'v'
+
+        animation = self._wheel_animations.get(key)
+        if animation is None:
+            animation = QtCore.QPropertyAnimation(bar, b"value", self.viewer)
+            animation.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+            animation.setDuration(WHEEL_SCROLL_DURATION_MS)
+            self._wheel_animations[key] = animation
+
+        running = animation.state() == QtCore.QAbstractAnimation.State.Running
+        start = self._wheel_targets.get(key, bar.value()) if running else bar.value()
+        target = int(round(start - notches * WHEEL_SCROLL_STEP))
+        target = max(bar.minimum(), min(bar.maximum(), target))
+        self._wheel_targets[key] = target
+
+        animation.stop()
+        animation.setStartValue(bar.value())
+        animation.setEndValue(target)
+        animation.start()
+        event.accept()
 
     def handle_viewport_event(self, event: QtCore.QEvent):
         if event.type() in (QEvent.Type.TouchBegin, QEvent.Type.TouchUpdate, QEvent.Type.TouchEnd):
