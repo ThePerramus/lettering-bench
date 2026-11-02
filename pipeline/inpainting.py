@@ -26,6 +26,10 @@ FAST_FILL_MIN_UNIFORM_COVERAGE = 0.94
 FAST_FILL_LOOSE_COLOR_TOLERANCE = 32
 FAST_FILL_MIN_LOOSE_COVERAGE = 0.98
 FAST_FILL_LOOSE_MIN_BRIGHTNESS = 200
+# The uniformity sample is limited to this band (px) around the text: the
+# bubble clip can leak through a gap in the outline into neighbouring artwork,
+# and only the background right around the glyphs matters for a flat fill.
+FAST_FILL_NEAR_TEXT_RADIUS = 12
 
 
 def call_inpaint_image(inpainting_handler, image: np.ndarray, mask: np.ndarray, config, blk_list: list | None = None):
@@ -70,6 +74,7 @@ class InpaintingHandler:
         image_viewer = self.main_page.image_viewer
         settings_page = self.main_page.settings_page
         mask = image_viewer.get_mask_for_inpainting()
+        human_mask = getattr(image_viewer.drawing_manager, "last_human_mask", None)
         
         # Handle webtoon mode vs regular mode differently
         mappings = None
@@ -85,7 +90,9 @@ class InpaintingHandler:
 
         config = get_config(settings_page)
         inpaint_blocks = self._get_manual_fast_fill_blocks(mappings)
-        inpaint_input_img = self.inpaint_image(image, mask, config, blk_list=inpaint_blocks or None)
+        inpaint_input_img = self.inpaint_image(
+            image, mask, config, blk_list=inpaint_blocks or None, human_mask=human_mask
+        )
         inpaint_input_img = imk.convert_scale_abs(inpaint_input_img) 
 
         return inpaint_input_img
@@ -97,7 +104,7 @@ class InpaintingHandler:
         arr = np.array(ptr).reshape(qimg.height(), qimg.bytesPerLine())
         return arr[:, :qimg.width()]
 
-    def _generate_mask_from_saved_strokes(self, strokes: list[dict], image: np.ndarray):
+    def _generate_mask_from_saved_strokes(self, strokes: list[dict], image: np.ndarray, return_human: bool = False):
         if image is None or not strokes:
             return None
         height, width = image.shape[:2]
@@ -149,7 +156,9 @@ class InpaintingHandler:
         human_mask = imk.dilate(human_mask, np.ones((3, 3), np.uint8), iterations=1)
         mask = np.where((human_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
         if np.count_nonzero(mask) == 0:
-            return None
+            return (None, None) if return_human else None
+        if return_human:
+            return mask, (human_mask if np.any(human_mask) else None)
         return mask
 
     def _get_manual_fast_fill_blocks(self, mappings: list[dict] | None = None) -> list:
@@ -463,6 +472,16 @@ class InpaintingHandler:
         if sample_count < 64:
             return False, f"bubble-background-too-small:{sample_count}"
 
+        near_text = imk.dilate(
+            binary_mask,
+            np.ones((2 * FAST_FILL_NEAR_TEXT_RADIUS + 1, 2 * FAST_FILL_NEAR_TEXT_RADIUS + 1), np.uint8),
+            iterations=1,
+        ) > 0
+        near_region = sample_region & near_text
+        near_count = int(np.count_nonzero(near_region))
+        if near_count >= 64:
+            sample_region, sample_count = near_region, near_count
+
         pixels = crop[sample_region, :3].astype(np.float32)
         median = np.median(pixels, axis=0)
         close_to_median = np.all(
@@ -573,6 +592,7 @@ class InpaintingHandler:
         image: np.ndarray,
         mask: np.ndarray,
         blk_list: list | None,
+        human_mask: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray, int]:
         if image is None or mask is None or not np.any(mask) or not blk_list:
             return image.copy(), mask.copy(), 0
@@ -709,6 +729,11 @@ class InpaintingHandler:
                 if bubble_clip is not None:
                     bubble_allowed[by1:by2, bx1:bx2] |= bubble_clip
             spill = (residual_mask > 0) & bubble_scope & ~bubble_allowed
+            # Hand-painted strokes are deliberate - e.g. letters touching a
+            # caption's border, outside the inset interior. Hand those to the
+            # NN inpainter instead of silently discarding them.
+            if human_mask is not None and human_mask.shape == spill.shape:
+                spill &= ~(human_mask > 0)
             if np.any(spill):
                 residual_mask[spill] = 0
         return cleaned_image, residual_mask, cleaned_blocks
@@ -838,7 +863,14 @@ class InpaintingHandler:
         h = int(stats[label, imk.CC_STAT_HEIGHT])
         return num_labels - 1, int(stats[label, imk.CC_STAT_AREA]), (x, y, w, h)
 
-    def inpaint_image(self, image: np.ndarray, mask: np.ndarray, config, blk_list: list | None = None) -> np.ndarray:
+    def inpaint_image(
+        self,
+        image: np.ndarray,
+        mask: np.ndarray,
+        config,
+        blk_list: list | None = None,
+        human_mask: np.ndarray | None = None,
+    ) -> np.ndarray:
         """
         Intelligently chooses between full-image and patch-based inpainting
         based on image size, number of text blocks, and total mask area.
@@ -848,7 +880,9 @@ class InpaintingHandler:
         if mask is None or not np.any(mask):
             return image.copy()
 
-        working_image, working_mask, cleaned_blocks = self._apply_fast_bubble_cleanup(image, mask, blk_list)
+        working_image, working_mask, cleaned_blocks = self._apply_fast_bubble_cleanup(
+            image, mask, blk_list, human_mask=human_mask
+        )
         if cleaned_blocks:
             logger.info("Inpaint hybrid: fast-cleaned %d bubble blocks", cleaned_blocks)
         if working_mask is None or not np.any(working_mask):
@@ -932,11 +966,11 @@ class InpaintingHandler:
             return self._inpaint_full_image(working_image, working_mask, config)
 
     def inpaint_page_from_saved_strokes(self, image: np.ndarray, strokes: list[dict], blk_list: list | None = None):
-        mask = self._generate_mask_from_saved_strokes(strokes, image)
+        mask, human_mask = self._generate_mask_from_saved_strokes(strokes, image, return_human=True)
         if mask is None:
             return []
         config = get_config(self.main_page.settings_page)
-        inpainted = self.inpaint_image(image, mask, config, blk_list=blk_list or None)
+        inpainted = self.inpaint_image(image, mask, config, blk_list=blk_list or None, human_mask=human_mask)
         inpainted = imk.convert_scale_abs(inpainted)
         return self._get_regular_patches(mask, inpainted)
 

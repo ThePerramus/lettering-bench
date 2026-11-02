@@ -72,6 +72,7 @@ class DrawingManager:
         # correctly with zoom and always shows exactly where/how big the next
         # stroke will be, even before you start dragging.
         self.hover_preview_item = None
+        self.last_human_mask = None
 
         self.before_erase_state = []
         self.after_erase_state = []
@@ -841,6 +842,9 @@ class DrawingManager:
         # A one-pixel halo catches antialiased edges without making the actual
         # cleanup area noticeably wider than the brush the user painted.
         human_mask = imk.dilate(human_mask, np.ones((3, 3), np.uint8), iterations=1)
+        # Clean needs to know which pixels the user painted by hand: those
+        # must never be dropped as bubble-outline "spill" (pipeline/inpainting.py).
+        self.last_human_mask = human_mask if np.any(human_mask) else None
 
         # Combine masks (bitwise_or equivalent)
         final_mask = np.where((human_mask > 0) | (gen_mask > 0), 255, 0).astype(np.uint8)
