@@ -183,7 +183,9 @@ class WorkspaceMixin:
         self.central_widget = central_widget
         central_layout = QtWidgets.QVBoxLayout(central_widget)
         central_layout.addWidget(self.central_stack)
-        central_layout.setContentsMargins(10, 10, 10, 10)
+        # No gutter around the canvas: on a vertical monitor every pixel of
+        # editing area counts, and the floating panels keep their own margin.
+        central_layout.setContentsMargins(0, 0, 0, 0)
 
         right_layout = QtWidgets.QVBoxLayout()
         right_layout.addLayout(self.top_actions_layout)
