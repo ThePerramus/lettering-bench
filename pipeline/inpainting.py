@@ -31,6 +31,19 @@ FAST_FILL_LOOSE_MIN_BRIGHTNESS = 200
 # and only the background right around the glyphs matters for a flat fill.
 FAST_FILL_NEAR_TEXT_RADIUS = 12
 
+# Hand-painted strokes left over after the bubble fast-fill (usually text the
+# detector missed) are flat-filled when the ring of pixels around them is
+# flat, and handed to the NN otherwise (text painted over artwork/texture).
+HUMAN_FILL_RING_GAP = 3
+HUMAN_FILL_RING_WIDTH = 12
+# A bubble/caption outline next to the stroke is tolerated: a few connected
+# dark pieces. Screentone dots or hatching break into many pieces and still go
+# to the NN. The ratio is only a sanity cap - in a tight caption the outline
+# can outweigh the thin strip of background between it and the text.
+HUMAN_FILL_DARK_DELTA = 80
+HUMAN_FILL_MAX_DARK_RATIO = 0.5
+HUMAN_FILL_MAX_DARK_COMPONENTS = 3
+
 
 def call_inpaint_image(inpainting_handler, image: np.ndarray, mask: np.ndarray, config, blk_list: list | None = None):
     inpaint_image = inpainting_handler.inpaint_image
@@ -735,8 +748,175 @@ class InpaintingHandler:
             if human_mask is not None and human_mask.shape == spill.shape:
                 spill &= ~(human_mask > 0)
             if np.any(spill):
+                # Letters close to the outline that the inset fill didn't reach:
+                # flat-fill them when only clean background surrounds them.
+                # Anything touching the outline is still dropped, so the NN
+                # never gets to smear (or the fill to thin) the outline.
+                self._apply_ring_fill(
+                    cleaned_image, residual_mask, spill, "bubble-edge leftover",
+                    allow_outline_contact=False,
+                )
+                spill &= residual_mask > 0
                 residual_mask[spill] = 0
         return cleaned_image, residual_mask, cleaned_blocks
+
+    def _apply_ring_fill(
+        self,
+        image: np.ndarray,
+        residual_mask: np.ndarray,
+        seeds: np.ndarray,
+        kind: str,
+        *,
+        allow_outline_contact: bool = True,
+    ) -> int:
+        """Flat-fill residual areas (those containing seeds) whose surroundings are flat.
+
+        Works in place on image/residual_mask; returns how many areas it filled.
+        """
+        if seeds.shape != residual_mask.shape:
+            return 0
+        residual = residual_mask > 0
+        seeds = residual & (seeds > 0)
+        if not np.any(seeds):
+            return 0
+
+        _num, labels, stats, _centroids = imk.connected_components_with_stats(
+            residual.astype(np.uint8),
+            connectivity=8,
+        )
+        seed_labels = np.unique(labels[seeds])
+        seed_labels = seed_labels[seed_labels > 0]
+        height, width = residual.shape
+        pad = HUMAN_FILL_RING_GAP + HUMAN_FILL_RING_WIDTH + 1
+        filled = 0
+        for label in seed_labels:
+            x = int(stats[label, imk.CC_STAT_LEFT])
+            y = int(stats[label, imk.CC_STAT_TOP])
+            w = int(stats[label, imk.CC_STAT_WIDTH])
+            h = int(stats[label, imk.CC_STAT_HEIGHT])
+            x1, y1 = max(0, x - pad), max(0, y - pad)
+            x2, y2 = min(width, x + w + pad), min(height, y + h + pad)
+            area = labels[y1:y2, x1:x2] == label
+            crop = image[y1:y2, x1:x2]
+            fill_color, reason = self._estimate_ring_fill_color(
+                crop, area, residual[y1:y2, x1:x2], allow_outline_contact=allow_outline_contact
+            )
+            if fill_color is None:
+                logger.info("Inpaint fast-fill: %s %s not flat-filled (%s)", kind, (x, y, w, h), reason)
+                continue
+
+            soft_mask = imk.gaussian_blur(area.astype(np.uint8) * 255, 1.0).astype(np.float32) / 255.0
+            soft_mask = np.clip(soft_mask, 0.0, 1.0)[..., np.newaxis]
+            fill_rgb = np.broadcast_to(fill_color, crop.shape).astype(np.float32)
+            blended = crop.astype(np.float32) * (1.0 - soft_mask) + fill_rgb * soft_mask
+            image[y1:y2, x1:x2] = np.clip(np.round(blended), 0, 255).astype(np.uint8)
+            residual_mask[y1:y2, x1:x2][area] = 0
+            filled += 1
+            logger.info("Inpaint fast-fill: %s %s flat-filled (%s)", kind, (x, y, w, h), reason)
+        return filled
+
+    def _estimate_ring_fill_color(
+        self,
+        crop: np.ndarray,
+        area: np.ndarray,
+        residual_crop: np.ndarray,
+        *,
+        allow_outline_contact: bool = True,
+    ) -> tuple[np.ndarray | None, str]:
+        area_u8 = area.astype(np.uint8)
+
+        def grow(mask_u8: np.ndarray, radius: int) -> np.ndarray:
+            kernel = np.ones((2 * radius + 1, 2 * radius + 1), np.uint8)
+            return imk.dilate(mask_u8, kernel, iterations=1) > 0
+
+        outer = grow(area_u8, HUMAN_FILL_RING_GAP + HUMAN_FILL_RING_WIDTH)
+        around = outer & ~area & ~residual_crop
+        ring = around & ~grow(area_u8, HUMAN_FILL_RING_GAP)
+        if np.count_nonzero(ring) < 64:
+            return None, f"ring-too-small:{int(np.count_nonzero(ring))}"
+
+        # "Dark" is relative to the background right next to the stroke.
+        near = around & ~grow(area_u8, HUMAN_FILL_RING_GAP + 4)
+        near = around & ~near
+        near_pixels = crop[near, :3] if np.count_nonzero(near) >= 16 else crop[ring, :3]
+        dark_threshold = float(np.median(near_pixels.astype(np.float32), axis=0).mean()) - HUMAN_FILL_DARK_DELTA
+        dark = np.zeros(area.shape, dtype=bool)
+        dark[around] = crop[around, :3].astype(np.float32).mean(axis=1) <= dark_threshold
+
+        # Only sample the background reachable from the stroke without crossing
+        # a dark line: a caption's border bounds it, so the artwork outside
+        # the box doesn't count as texture around the text.
+        num_open, open_labels = imk.connected_components((around & ~dark).astype(np.uint8), connectivity=4)
+        area_edge = grow(area_u8, 1) & ~area
+        touching = np.unique(open_labels[area_edge & (open_labels > 0)])
+        reachable = np.isin(open_labels, touching[touching > 0])
+        # Skip the antialiased fringe of outlines - grey, but not dark enough
+        # to count as the line itself.
+        sample = ring & reachable & ~grow(dark.astype(np.uint8), 2)
+        sample_count = int(np.count_nonzero(sample))
+        if sample_count < 64:
+            return None, f"ring-too-small:{sample_count}"
+
+        # Dark structure bordering that background: an outline (a few pieces)
+        # is fine, hatching or screentone (many pieces / lots of ink) is not.
+        boundary_dark = dark & grow(reachable.astype(np.uint8), 1) & ring
+        dark_ratio = float(np.count_nonzero(boundary_dark)) / float(sample_count + np.count_nonzero(boundary_dark))
+        if dark_ratio > HUMAN_FILL_MAX_DARK_RATIO:
+            return None, f"dark-ratio={dark_ratio:.3f}"
+        if np.any(boundary_dark):
+            _num_dark, dark_labels = imk.connected_components(dark.astype(np.uint8), connectivity=8)
+            outline_labels = np.unique(dark_labels[boundary_dark])
+            outline_labels = outline_labels[outline_labels > 0]
+            if outline_labels.size > HUMAN_FILL_MAX_DARK_COMPONENTS:
+                return None, f"dark-components={outline_labels.size}"
+            # Only the ink that borders the sampled background: dark artwork on
+            # the far side of a caption border would otherwise join the line's
+            # two ends into one apparent contact.
+            contact = area_edge & np.isin(dark_labels, outline_labels) & grow(reachable.astype(np.uint8), 1)
+            if np.any(contact):
+                if not allow_outline_contact:
+                    return None, "touches-outline"
+                # A line that enters the area on one side and leaves on the
+                # other is being painted over: a flat fill would cut it, the NN
+                # can redraw it. A letter merely touching the border makes a
+                # single contact and is fine.
+                _num_contacts, contact_labels = imk.connected_components(contact.astype(np.uint8), connectivity=8)
+                for outline_label in outline_labels:
+                    pieces = np.unique(contact_labels[contact & (dark_labels == outline_label)])
+                    if np.count_nonzero(pieces) >= 2:
+                        return None, "outline-crosses-stroke"
+
+        pixels = crop[sample, :3].astype(np.float32)
+        median = np.median(pixels, axis=0)
+        close = np.all(np.abs(pixels - median) <= FAST_FILL_UNIFORM_COLOR_TOLERANCE, axis=1)
+        coverage = float(np.count_nonzero(close)) / float(sample_count)
+        if coverage < FAST_FILL_MIN_UNIFORM_COVERAGE:
+            loose = np.all(np.abs(pixels - median) <= FAST_FILL_LOOSE_COLOR_TOLERANCE, axis=1)
+            loose_coverage = float(np.count_nonzero(loose)) / float(sample_count)
+            if (
+                loose_coverage < FAST_FILL_MIN_LOOSE_COVERAGE
+                or float(np.min(median)) < FAST_FILL_LOOSE_MIN_BRIGHTNESS
+            ):
+                return None, f"ring-nonuniform:coverage={coverage:.3f},loose={loose_coverage:.3f}"
+
+        # Gradients: every ninth of the sampled ring must agree on the colour.
+        ys, xs = np.nonzero(sample)
+        ry1, ry2, rx1, rx2 = int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1
+        for gy in range(3):
+            for gx in range(3):
+                cy1 = ry1 + round(gy * (ry2 - ry1) / 3)
+                cy2 = ry1 + round((gy + 1) * (ry2 - ry1) / 3)
+                cx1 = rx1 + round(gx * (rx2 - rx1) / 3)
+                cx2 = rx1 + round((gx + 1) * (rx2 - rx1) / 3)
+                cell = sample[cy1:cy2, cx1:cx2]
+                if np.count_nonzero(cell) < 32:
+                    continue
+                cell_median = np.median(crop[cy1:cy2, cx1:cx2][cell, :3].astype(np.float32), axis=0)
+                shift = float(np.max(np.abs(cell_median - median)))
+                if shift > FAST_FILL_UNIFORM_COLOR_TOLERANCE:
+                    return None, f"ring-color-shift={shift:.1f}"
+
+        return median, f"ring-uniform:coverage={coverage:.3f},outline={dark_ratio:.3f}"
 
     def _fast_fill_block(
         self,
@@ -885,6 +1065,10 @@ class InpaintingHandler:
         )
         if cleaned_blocks:
             logger.info("Inpaint hybrid: fast-cleaned %d bubble blocks", cleaned_blocks)
+        if human_mask is not None and working_mask is not None and np.any(working_mask):
+            human_filled = self._apply_ring_fill(working_image, working_mask, human_mask, "hand-painted area")
+            if human_filled:
+                logger.info("Inpaint hybrid: flat-filled %d hand-painted areas", human_filled)
         if working_mask is None or not np.any(working_mask):
             return working_image
 
