@@ -230,7 +230,8 @@ class DrawingManager:
         self.viewer.drawing_path = None
 
     def erase_at(self, pos: QPointF):
-        radius = self._effective_size(self.eraser_size)
+        # The size is a diameter, like the brush pen width and the hover preview circle.
+        radius = self._effective_size(self.eraser_size) / 2.0
         erase_path = QPainterPath()
         erase_path.addEllipse(pos, radius, radius)
 
