@@ -21,6 +21,10 @@ class OCRHandler:
             self.main_page.s_combo.currentText(),
             self.main_page.lang_mapping,
         )
+        logger.info(
+            "OCR request: single_block=%s, blocks=%d, rectangles=%d",
+            single_block, len(self.main_page.blk_list), len(self.main_page.image_viewer.rectangles),
+        )
         if self.main_page.image_viewer.hasPhoto() and self.main_page.image_viewer.rectangles:
             image = self.main_page.image_viewer.get_image_array()
             ocr_model = self.main_page.settings_page.get_tool_selection('ocr')
@@ -32,10 +36,12 @@ class OCRHandler:
             if single_block:
                 blk = self.pipeline.get_selected_block()
                 if blk is None:
+                    logger.info("OCR single block: no block matches the selected box, nothing done")
                     return
-                
+
                 # Check if block already has text to avoid redundant processing
                 if hasattr(blk, 'text') and blk.text and blk.text.strip():
+                    logger.info("OCR single block %s already has text, skipped: %r", list(blk.xyxy), blk.text[:40])
                     return
                 
                 # Check if we have cached results for this image/model/language
@@ -80,8 +86,21 @@ class OCRHandler:
                         blk.text = cached_text
                         logger.info(f"Cached OCR results and extracted text for block: {cached_text}")
             else:
+                # A page that's already partly done (a box added for a missed
+                # bubble): only read the boxes without text, so text fixed by
+                # hand elsewhere isn't overwritten. With every box filled in,
+                # the whole page is read again.
+                pending = [blk for blk in self.main_page.blk_list if not (blk.text or "").strip()]
+                if pending and len(pending) < len(self.main_page.blk_list):
+                    self.ocr.initialize(self.main_page, source_lang)
+                    self.ocr.process(image, pending)
+                    self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list)
+                    logger.info(
+                        "OCR completed for %d blocks without text (kept %d)",
+                        len(pending), len(self.main_page.blk_list) - len(pending),
+                    )
                 # For full page OCR, check if we can use cached results
-                if self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, self.main_page.blk_list):
+                elif self.cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, self.main_page.blk_list):
                     # All blocks can be served from cache
                     self.cache_manager._apply_cached_ocr_to_blocks(cache_key, self.main_page.blk_list)
                     logger.info(f"Using cached OCR results for all {len(self.main_page.blk_list)} blocks")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import copy
+import logging
 import numpy as np
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,8 @@ from modules.utils.language_utils import to_canonical_language_name
 from modules.utils.image_utils import get_smart_text_color
 from modules.utils.common_utils import is_close
 from modules.utils.translator_utils import format_translations, is_renderable_translation
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
@@ -957,6 +960,12 @@ class TextController:
                 blk for blk in self.main.blk_list
                 if (int(blk.xyxy[0]), int(blk.xyxy[1]), blk.angle) not in existing_text_items.values()
             ]
+
+            logger.info(
+                "Render: %d blocks, %d text items, %d new: %s",
+                len(self.main.blk_list), len(existing_text_items), len(new_blocks),
+                [(list(b.xyxy), b.angle, (b.text or "")[:20], (b.translation or "")[:20]) for b in new_blocks],
+            )
 
             self.main.image_viewer.clear_rectangles()
             self.main.curr_tblock = None

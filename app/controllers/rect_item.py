@@ -74,6 +74,7 @@ class RectItemController:
         self.main.blk_list.append(new_blk)
         command = AddRectangleCommand(self.main, rect_item, new_blk, self.main.blk_list)
         self.main.undo_group.activeStack().push(command)
+        self.main.image_viewer.select_rectangle(rect_item)
 
     def handle_rectangle_deletion(self, rect: QRectF):
         rect_coords = rect.getCoords()

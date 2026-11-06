@@ -56,10 +56,12 @@ class TranslationHandler:
             if single_block:
                 blk = self.pipeline.get_selected_block()
                 if blk is None:
+                    logger.info("Translate single block: no block matches the selected box, nothing done")
                     return
-                
+
                 # Check if block already has translation to avoid redundant processing
                 if hasattr(blk, 'translation') and blk.translation and blk.translation.strip():
+                    logger.info("Translate single block %s already translated, skipped", list(blk.xyxy))
                     return
                 
                 # Check if we have cached translation results for this image/translator/language combination
@@ -103,6 +105,23 @@ class TranslationHandler:
                     
                     set_upper_case([blk], upper_case)
             else:
+                # Same rule as OCR: on a partly done page, only translate the
+                # boxes that have text but no translation, so translations
+                # typed by hand aren't overwritten.
+                blk_list = self.main_page.blk_list
+                pending = [
+                    blk for blk in blk_list
+                    if (blk.text or "").strip() and not (blk.translation or "").strip()
+                ]
+                if pending and len(pending) < len([blk for blk in blk_list if (blk.text or "").strip()]):
+                    translator.translate(pending, image, extra_context)
+                    self.cache_manager._cache_translation_results(translation_cache_key, blk_list)
+                    set_upper_case(pending, upper_case)
+                    logger.info(
+                        "Translation completed for %d untranslated blocks (kept %d)",
+                        len(pending), len(blk_list) - len(pending),
+                    )
+                    return
                 # For full page translation, check if we can use cached results
                 if self.cache_manager._can_serve_all_blocks_from_translation_cache(translation_cache_key, self.main_page.blk_list):
                     # All blocks can be served from cache with matching source text

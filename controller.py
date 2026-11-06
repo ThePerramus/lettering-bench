@@ -840,8 +840,8 @@ class ComicTranslate(ComicTranslateUI):
     def _get_visible_text_items(self):
         return self.manual_workflow_ctrl._get_visible_text_items()
 
-    def update_translated_text_items(self, single_blk: bool):
-        self.manual_workflow_ctrl.update_translated_text_items(single_blk)
+    def update_translated_text_items(self, single_blk: bool, before=None):
+        self.manual_workflow_ctrl.update_translated_text_items(single_blk, before)
 
     def inpaint_and_set(self):
         self.manual_workflow_ctrl.inpaint_and_set()

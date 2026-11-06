@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from typing import TYPE_CHECKING, Any, Sequence
 
 from PySide6 import QtCore
@@ -16,6 +18,8 @@ from modules.utils.pipeline_config import validate_ocr, validate_translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.ui.canvas.text_item import TextBlockItem
@@ -413,23 +417,28 @@ class ManualWorkflowController:
         if not is_there_text(self.main.blk_list) or not validate_translator(
             self.main, target_lang
         ):
+            logger.info(
+                "Translate skipped: blocks=%d, with text=%d",
+                len(self.main.blk_list), sum(1 for b in self.main.blk_list if b.text),
+            )
             return
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
+        before = {id(blk): blk.translation for blk in self.main.blk_list}
 
         if self.main.webtoon_mode:
             self.main.run_threaded(
                 lambda: self.main.pipeline.translate_webtoon_visible_area(single_block),
                 None,
                 self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda: self.update_translated_text_items(single_block, before),
             )
         else:
             self.main.run_threaded(
                 lambda: self.main.pipeline.translate_image(single_block),
                 None,
                 self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda: self.update_translated_text_items(single_block, before),
             )
 
     def _get_visible_text_items(self) -> list[TextBlockItem]:
@@ -439,7 +448,17 @@ class ManualWorkflowController:
             self.main.image_viewer.text_items, self.main.image_viewer.webtoon_manager
         )
 
-    def update_translated_text_items(self, single_blk: bool) -> None:
+    def update_translated_text_items(
+        self, single_blk: bool, before: dict[int, str] | None = None
+    ) -> None:
+        """before maps id(block) -> its translation before translating; when
+        given, only text items whose block's translation changed are re-set."""
+        changed = None
+        if before is not None:
+            changed = {
+                id(blk) for blk in self.main.blk_list
+                if before.get(id(blk)) != blk.translation
+            }
         
         def set_new_text(
             text_item: TextBlockItem, 
@@ -477,6 +496,8 @@ class ManualWorkflowController:
                     None,
                 )
                 if not (blk and blk.translation):
+                    continue
+                if changed is not None and id(blk) not in changed:
                     continue
 
                 vertical = is_vertical_block(blk, trg_lng_cd)
@@ -648,7 +669,9 @@ class ManualWorkflowController:
             self.main.set_tool("brush")
             self.main.disable_hbutton_group()
             self.main.image_viewer.clear_rectangles()
-            self.main.image_viewer.clear_text_items()
+            # Text already rendered on this page stays: segmenting again after
+            # adding a missed bubble must not throw away the finished text
+            # (Render only adds blocks that don't have a text item yet).
 
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()
@@ -727,10 +750,22 @@ class ManualWorkflowController:
                     )
                 else:
 
+                    # Blocks already rendered were cleaned before: re-masking
+                    # them would redo the user's mask corrections there. Same
+                    # key Render uses to decide what is already rendered.
+                    rendered = {
+                        (int(item.pos().x()), int(item.pos().y()), item.rotation())
+                        for item in self.main.image_viewer.text_items
+                    }
+                    pending_blocks = [
+                        blk for blk in self.main.blk_list
+                        if (int(blk.xyxy[0]), int(blk.xyxy[1]), blk.angle) not in rendered
+                    ]
+
                     def compute_all_strokes() -> list[tuple[TextBlock, Any]]:
                         image = self.main.image_viewer.get_image_array()
                         results = []
-                        for blk in self.main.blk_list:
+                        for blk in pending_blocks:
                             stroke = self.main.image_viewer.drawing_manager.make_segmentation_stroke_data(blk, image)
                             results.append((blk, stroke))
                         return results
