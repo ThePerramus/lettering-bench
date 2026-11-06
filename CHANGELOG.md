@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-46 commits, 32 files touched, roughly +2,710/−110 lines relative to `v2.8.9`.
+65 commits, 51 files touched, roughly +3,880/−320 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -35,6 +35,19 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 - **Full persistence** — alignment, offsets, exclusions, and the reference book's path all survive
   closing and reopening the project.
 
+## Workspace
+
+- **Redesigned top toolbar** — collapsible page list, floating page-navigation arrows, and a
+  compact Automatic mode row (with the loading spinner in it).
+- **Icon rail instead of the right panel** — the tool rows became a narrow icon rail with two
+  on-demand flyout panels (Text and Reference Page); the left nav rail is grouped, and a panel
+  closed by hand stays closed across page switches. The paint-tool size box sits under the
+  flyouts, top right.
+- **More room for the page** — the 10px gutter around the canvas is gone.
+- **Scroll past a fully visible page** — the mouse wheel can move the page out from under the
+  floating panels even when it fits on screen (useful on a vertical monitor), in smooth steps
+  instead of big jumps. Ctrl+wheel still zooms.
+
 ## Precision editing
 
 - **Shift-constrain** — hold Shift while drawing with the brush, eraser, pencil, patch eraser, or
@@ -44,6 +57,8 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 ## Lettering & text rendering
 
+- **Format several boxes at once** — alignment, bold/italic/underline, outline and line spacing
+  apply to every selected text box, not just the current one.
 - **Justify alignment** — a fourth option beside left/center/right; the paragraph's final line
   keeps its natural width instead of being stretched.
 - **Live word-wrap** — neither the manual Render step nor the automatic "Translate All"
@@ -51,6 +66,25 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   when the font size or box size changes.
 - **Syllable hyphenation** — long words that don't fit a narrow bubble break at a real syllable
   boundary instead of overflowing or splitting arbitrarily.
+
+## Recognition
+
+- **Custom OCR engine** — any OpenAI-compatible vision endpoint (URL, model, API key), mirroring
+  the existing Custom translator; works with e.g. Gemini's OpenAI-compatible API.
+
+## Clean (inpainting) quality
+
+- **Flat fill for more bubbles** — text-dense bubbles and bubbles on grainy paper are filled with
+  their flat background color instead of being sent to LaMa, which used to leave a faint texture.
+  Bubble flatness is judged near the text, so artwork elsewhere in the bubble's box doesn't
+  count against it, and the looser grain tolerance only applies to light backgrounds.
+- **Hand-painted mask strokes are honored** — areas added with the brush are no longer dropped
+  when they reach a bubble's edge. They're flat-filled when the surrounding background is flat
+  (the usual case: text the detector missed inside a bubble), and only go to LaMa over texture or
+  when an outline actually runs through the stroke.
+- **Leftover letters next to bubble outlines** are flat-filled when only clean background
+  surrounds them, instead of being left behind; anything touching the outline is still left
+  alone so the outline itself is never smeared or thinned.
 
 ## Inpainting touch-ups
 
@@ -63,6 +97,20 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   blocked the real text; one used after a reveal still stays as a permanent top layer. Also fixed
   the patch eraser and reveal-pencil losing each other's work through the same "opaque rectangle
   instead of real stroke shape" root cause.
+
+## Manual workflow fixes
+
+- **Adding a missed bubble to a finished page keeps the finished work** — Segment no longer
+  removes the page's rendered text and only masks boxes that don't have text rendered yet; on a
+  partly done page, OCR only reads boxes without text and Translate only translates boxes without
+  a translation, so text and translations fixed by hand aren't overwritten (with every box filled
+  in, the whole page is redone as before); after translating, only text boxes whose translation
+  changed are re-wrapped, keeping hand-set font sizes.
+- **A newly drawn text box is selected right away**, so source/translation text typed next goes
+  to it instead of to whichever box was selected before.
+- **The eraser matches its preview circle** — it used to erase twice as wide as the circle shown.
+- OCR, Translate and Render now log the cases where they used to stop silently, so a step that
+  "does nothing" can be traced in `crash_logs`.
 
 ## Stability fixes
 
