@@ -17,6 +17,7 @@ from modules.utils.language_utils import to_canonical_language_name
 from modules.utils.pipeline_config import validate_ocr, validate_translator
 from modules.utils.textblock import sort_blk_list
 from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case
+from modules.utils.hyphenation import hyphenate_text
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
 
 logger = logging.getLogger(__name__)
@@ -266,6 +267,12 @@ class ManualWorkflowController:
                     if image is None:
                         continue
                     source_lang = state.get("source_lang", source_lang_fallback)
+                    pending = [blk for blk in blk_list if not (blk.text or "").strip()]
+                    if pending and len(pending) < len(blk_list):
+                        ocr.initialize(self.main, source_lang)
+                        ocr.process(image, pending)
+                        results[file_path] = blk_list
+                        continue
                     cache_key = cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
                     if cache_manager._can_serve_all_blocks_from_ocr_cache(cache_key, blk_list):
                         cache_manager._apply_cached_ocr_to_blocks(cache_key, blk_list)
@@ -355,6 +362,7 @@ class ManualWorkflowController:
             extra_context = settings_page.get_llm_settings()["extra_context"]
             translator_key = settings_page.get_tool_selection("translator")
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
+            before = self._translations_by_position(self.main.blk_list)
 
             def translate_selected_pages() -> dict[str, list[TextBlock]]:
                 cache_manager = self.main.pipeline.cache_manager
@@ -370,6 +378,15 @@ class ManualWorkflowController:
                     source_lang = state.get("source_lang", source_lang_fallback)
                     target_lang = state.get("target_lang", target_lang_fallback)
                     translator = Translator(self.main, source_lang, target_lang)
+                    # Same rule as the single-page Translate: on a partly done
+                    # page only the boxes without a translation are translated.
+                    with_text = [blk for blk in blk_list if (blk.text or "").strip()]
+                    pending = [blk for blk in with_text if not (blk.translation or "").strip()]
+                    if pending and len(pending) < len(with_text):
+                        translator.translate(pending, image, extra_context)
+                        set_upper_case(pending, upper_case)
+                        results[file_path] = blk_list
+                        continue
                     cache_key = cache_manager._get_translation_cache_key(
                         image,
                         source_lang,
@@ -407,7 +424,7 @@ class ManualWorkflowController:
                 translate_selected_pages,
                 on_translation_ready,
                 self.main.default_error_handler,
-                lambda: self.update_translated_text_items(single_block),
+                lambda: self.update_translated_text_items(single_block, before),
             )
             return
 
@@ -424,7 +441,7 @@ class ManualWorkflowController:
             return
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
-        before = {id(blk): blk.translation for blk in self.main.blk_list}
+        before = self._translations_by_position(self.main.blk_list)
 
         if self.main.webtoon_mode:
             self.main.run_threaded(
@@ -441,6 +458,13 @@ class ManualWorkflowController:
                 lambda: self.update_translated_text_items(single_block, before),
             )
 
+    @staticmethod
+    def _position_key(blk: TextBlock) -> tuple[int, int, float]:
+        return (int(blk.xyxy[0]), int(blk.xyxy[1]), round(float(blk.angle or 0), 1))
+
+    def _translations_by_position(self, blk_list: list[TextBlock]) -> dict[tuple, str]:
+        return {self._position_key(blk): blk.translation for blk in blk_list}
+
     def _get_visible_text_items(self) -> list[TextBlockItem]:
         if not self.main.webtoon_mode:
             return self.main.image_viewer.text_items
@@ -451,22 +475,25 @@ class ManualWorkflowController:
     def update_translated_text_items(
         self, single_blk: bool, before: dict[int, str] | None = None
     ) -> None:
-        """before maps id(block) -> its translation before translating; when
+        """before is _translations_by_position() taken before translating; when
         given, only text items whose block's translation changed are re-set."""
         changed = None
         if before is not None:
-            changed = {
-                id(blk) for blk in self.main.blk_list
-                if before.get(id(blk)) != blk.translation
-            }
-        
+            after = self._translations_by_position(self.main.blk_list)
+            changed = {key for key, translation in after.items() if before.get(key) != translation}
+
         def set_new_text(
-            text_item: TextBlockItem, 
-            wrapped: str, 
-            font_size: int
+            text_item: TextBlockItem,
+            text: str,
+            font_size: int,
+            width: float | None,
         ) -> None:
-            text_item.set_plain_text(wrapped)
+            text_item.set_plain_text(text)
             text_item.set_font_size(font_size)
+            if width is not None:
+                # Same as a fresh Render (see TextController.on_blk_rendered):
+                # live-wrap to the bubble width instead of baked line breaks.
+                text_item.setTextWidth(width)
 
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
@@ -497,12 +524,18 @@ class ManualWorkflowController:
                 )
                 if not (blk and blk.translation):
                     continue
-                if changed is not None and id(blk) not in changed:
+                if changed is not None and self._position_key(blk) not in changed:
                     continue
 
                 vertical = is_vertical_block(blk, trg_lng_cd)
+                no_space = is_no_space_lang(trg_lng_cd)
+                live_wrap = not (vertical or no_space)
+                # Same text handling as manual_wrap(): soft hyphens and no hard
+                # breaks for a horizontal, space-based language; pyside_word_wrap
+                # is only used for the font size there.
+                source_text = hyphenate_text(blk.translation, trg_lng_cd) if live_wrap else blk.translation
                 wrap_args = (
-                    blk.translation,
+                    source_text,
                     text_item.font_family,
                     blk.xyxy[2] - blk.xyxy[0],
                     blk.xyxy[3] - blk.xyxy[1],
@@ -516,13 +549,13 @@ class ManualWorkflowController:
                     rs.max_font_size,
                     rs.min_font_size,
                     vertical,
-                    is_no_space_lang(trg_lng_cd),
+                    no_space,
                 )
 
                 self.main.run_threaded(
                     pyside_word_wrap,
-                    lambda wrap_res, ti=text_item: set_new_text(
-                        ti, wrap_res[0], wrap_res[1]
+                    lambda wrap_res, ti=text_item, text=source_text, live=live_wrap, w=blk.xywh[2]: set_new_text(
+                        ti, text if live else wrap_res[0], wrap_res[1], w if live else None
                     ),
                     self.main.default_error_handler,
                     None,

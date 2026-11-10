@@ -106,6 +106,10 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   a translation, so text and translations fixed by hand aren't overwritten (with every box filled
   in, the whole page is redone as before); after translating, only text boxes whose translation
   changed are re-wrapped, keeping hand-set font sizes.
+- **Re-translating keeps the live wrap** — after translating one box on a rendered page (or
+  translating several pages at once), text boxes are refreshed the same way a fresh Render does:
+  flowing text with automatic soft hyphens, instead of baked-in line breaks and no hyphens.
+  Multi-page Render now uses the same live wrap too.
 - **A newly drawn text box is selected right away**, so source/translation text typed next goes
   to it instead of to whichever box was selected before.
 - **The eraser matches its preview circle** — it used to erase twice as wide as the circle shown.

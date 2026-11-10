@@ -23,6 +23,7 @@ from modules.utils.language_utils import to_canonical_language_name
 from modules.utils.image_utils import get_smart_text_color
 from modules.utils.common_utils import is_close
 from modules.utils.translator_utils import format_translations, is_renderable_translation
+from modules.utils.hyphenation import hyphenate_text
 
 logger = logging.getLogger(__name__)
 
@@ -863,6 +864,10 @@ class TextController:
                             continue
 
                         vertical = is_vertical_block(blk, trg_lng_cd)
+                        no_space = is_no_space_lang(trg_lng_cd)
+                        live_wrap = not (vertical or no_space)
+                        if live_wrap:
+                            translation = hyphenate_text(translation, trg_lng_cd)
                         wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
                             translation,
                             font_family,
@@ -878,9 +883,14 @@ class TextController:
                             max_font_size,
                             min_font_size,
                             vertical,
-                            is_no_space_lang(trg_lng_cd),
+                            no_space,
                             return_metrics=True,
                         )
+                        if live_wrap:
+                            # Keep the fitted font size but not the baked line
+                            # breaks; the box live-wraps at the bubble width.
+                            wrapped = translation
+                            rendered_width = block_width
 
                         font_color = get_smart_text_color(blk.font_color, setting_font_color)
                         text_props = TextItemProperties(
