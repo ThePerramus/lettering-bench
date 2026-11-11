@@ -257,6 +257,41 @@ class ToolStateMixin:
             return True
         return bool(self.reference_book_handler.file_paths)
 
+    def _reference_mode(self, file_path: str) -> str:
+        return self.reference_page_modes.get(file_path, self.reference_default_mode)
+
+    def _page_reveals_reference(self, file_path: str) -> bool:
+        """Reference page whose Render reveals the reference's pixels."""
+        return self._page_uses_reference_workflow(file_path) and self._reference_mode(file_path) != "reletter"
+
+    def _page_reletters_reference(self, file_path: str) -> bool:
+        """Reference page whose translated text is OCR'd off the aligned
+        reference and lettered in the chosen font by the normal Render."""
+        return self._page_uses_reference_workflow(file_path) and self._reference_mode(file_path) == "reletter"
+
+    def reference_text_image(self, file_path: str):
+        """The aligned reference warped into this page's coordinates (what
+        Recognize reads on a re-letter page), or None if not aligned yet."""
+        self._ensure_warped(file_path)
+        entry = self.reference_images.get(file_path)
+        return entry.get('warped') if entry else None
+
+    def set_reference_mode(self, index: int):
+        if not self.image_files:
+            return
+        mode = self.reference_mode_combo.itemData(index) or "reveal"
+        file_path = self.image_files[self.curr_img_idx]
+        if mode != self.reference_default_mode:
+            # Pages already worked on keep the mode they were done in; only
+            # untouched pages follow the new default.
+            for path in self.image_files:
+                if path not in self.reference_page_modes and self.image_patches.get(path):
+                    self.reference_page_modes[path] = self.reference_default_mode
+            self.reference_default_mode = mode
+        self.reference_page_modes[file_path] = mode
+        self.mark_project_dirty()
+        self._sync_hbutton_group_for_reference()
+
     @staticmethod
     def _square_erode(mask: np.ndarray, margin: int) -> np.ndarray:
         """Binary erosion by a square (2*margin+1) kernel, treating anything
@@ -417,18 +452,29 @@ class ToolStateMixin:
         if not self.image_files:
             return
         buttons = self.hbutton_group.get_button_group().buttons()
-        uses_reference = self._page_uses_reference_workflow(self.image_files[self.curr_img_idx])
+        file_path = self.image_files[self.curr_img_idx]
+        uses_reference = self._page_uses_reference_workflow(file_path)
+        reletter = self._page_reletters_reference(file_path)
         group_active = buttons[3].isEnabled()  # Segment
-        if uses_reference:
+        if uses_reference and not reletter:
             buttons[0].setEnabled(False)  # Detect
             buttons[1].setEnabled(False)  # Recognize
             buttons[2].setEnabled(False)  # Translate
         elif group_active:
+            # Re-letter pages keep all three: Detect (the boxes decide what
+            # gets read and where the text goes), Recognize (reads the
+            # reference) and Translate (an LLM fixes the OCR's misreads).
             buttons[0].setEnabled(True)
             buttons[1].setEnabled(True)
             buttons[2].setEnabled(True)
 
-        show_text = not uses_reference and not getattr(self, "_text_panel_user_closed", False)
+        if hasattr(self, "reference_mode_combo"):
+            with QtCore.QSignalBlocker(self.reference_mode_combo):
+                self.reference_mode_combo.setCurrentIndex(
+                    max(0, self.reference_mode_combo.findData(self._reference_mode(file_path))))
+            self.reference_mode_combo.setEnabled(uses_reference)
+
+        show_text = (not uses_reference or reletter) and not getattr(self, "_text_panel_user_closed", False)
         show_reference = uses_reference and not getattr(self, "_reference_panel_user_closed", False)
         if hasattr(self, "text_section_widget"):
             self.text_section_widget.setVisible(show_text)
@@ -456,7 +502,11 @@ class ToolStateMixin:
         else:
             target_paths = []
 
-        reveal_paths = [p for p in target_paths if self._page_uses_reference_workflow(p)]
+        for path in target_paths:
+            if self._page_uses_reference_workflow(path):
+                # Rendered in this mode: keep it even if the default changes.
+                self.reference_page_modes.setdefault(path, self._reference_mode(path))
+        reveal_paths = [p for p in target_paths if self._page_reveals_reference(p)]
         if reveal_paths:
             revealed_any = self.auto_reveal_pages(reveal_paths)
             if not revealed_any:

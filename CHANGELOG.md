@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-65 commits, 51 files touched, roughly +3,880/−320 lines relative to `v2.8.9`.
+68 commits, 51 files touched, roughly +4,330/−350 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -32,8 +32,21 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   corners keep Clean's own fill instead of the reference's off-tone scan background.
 - **Pipeline integration** — on a reference page, Recognize/Translate disable themselves and
   Render reveals instead of drawing new text.
-- **Full persistence** — alignment, offsets, exclusions, and the reference book's path all survive
-  closing and reopening the project.
+- **Re-letter mode** — a per-page "Translated Text" choice in the Reference Page panel: *Reveal
+  Original* (the above) or *Re-letter*, which reads the reference's translated text and letters it
+  as normal, editable text in the chosen font instead of bringing over the reference's pixels.
+  - **Recognize** reads the aligned reference, not the working page, and puts the result straight
+    into each box's translation. With a vision LLM as the translator it reads the whole page in
+    one request (boxes given by position, including text a box cuts off); otherwise the OCR engine
+    reads each box, in the target language.
+  - **Translate** becomes a proofreading pass: the LLM gets the reference page plus each box's
+    current text and returns what is actually printed, without translating or rewording.
+  - Line breaks and end-of-line hyphenation from the reference's lettering are removed, so Render
+    re-wraps and re-hyphenates the text to the box. Detect and the Text panel stay available.
+  - The mode picked becomes the default for pages not worked on yet; pages already cleaned keep
+    theirs.
+- **Full persistence** — alignment, offsets, exclusions, re-letter modes, and the reference book's
+  path all survive closing and reopening the project.
 
 ## Workspace
 

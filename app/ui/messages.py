@@ -92,6 +92,32 @@ class Messages:
         )
 
     @staticmethod
+    def show_reference_not_aligned_error(parent):
+        MMessage.error(
+            text=QCoreApplication.translate(
+                "Messages",
+                "Can't read the reference text: this page hasn't been aligned to a "
+                "reference yet (use the Reference Page tools)."
+            ),
+            parent=parent,
+            duration=None,
+            closable=True
+        )
+
+    @staticmethod
+    def show_reference_correct_needs_llm_error(parent):
+        MMessage.error(
+            text=QCoreApplication.translate(
+                "Messages",
+                "Correcting the reference text needs an LLM translator (GPT, Claude, "
+                "Gemini, Deepseek or Custom) selected in Settings."
+            ),
+            parent=parent,
+            duration=None,
+            closable=True
+        )
+
+    @staticmethod
     def show_insufficient_credits_error(parent, details: str = None):
         """
         Show an error message when the user has insufficient credits.

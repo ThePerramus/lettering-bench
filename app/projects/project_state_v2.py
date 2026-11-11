@@ -411,6 +411,8 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         "unique_images": ensure_string_keys(unique_images),
         "reference_page_offsets": [list(pair) for pair in comic_translate.reference_page_offsets],
         "reference_excluded_pages": list(comic_translate.reference_excluded_pages),
+        "reference_page_modes": dict(comic_translate.reference_page_modes),
+        "reference_default_mode": comic_translate.reference_default_mode,
         "reference_book_path": comic_translate.reference_book_path,
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
@@ -667,6 +669,11 @@ def _materialize_from_manifest_and_pages(
     comic_translate.reference_excluded_pages = set(
         original_to_temp.get(p, p) for p in manifest.get("reference_excluded_pages", [])
     )
+    comic_translate.reference_page_modes = {
+        original_to_temp.get(p, p): mode
+        for p, mode in (manifest.get("reference_page_modes") or {}).items()
+    }
+    comic_translate.reference_default_mode = manifest.get("reference_default_mode") or "reveal"
     # Not remapped through original_to_temp: this points at the user's own
     # reference book file (e.g. a cbz kept somewhere on disk), never at a
     # page-image path that a project reload would relocate.

@@ -107,6 +107,13 @@ class ComicTranslate(ComicTranslateUI):
         # pages only present in this edition) - excluded from the reference
         # workflow entirely, translated the traditional way instead.
         self.reference_excluded_pages = set()
+        # What a reference page does with the reference's translated text:
+        # "reveal" pastes its pixels into the cleaned areas (Render reveals),
+        # "reletter" OCRs it (Recognize reads the aligned reference) and
+        # Render letters it in the chosen font. Per page, falling back to the
+        # last mode picked.
+        self.reference_page_modes = {}
+        self.reference_default_mode = "reveal"
         self.max_images_in_memory = 5
         self.loaded_images = []
 
@@ -820,7 +827,10 @@ class ComicTranslate(ComicTranslateUI):
         # no difference. Segment/Clean stay enabled either way (finding and
         # clearing the text is language-agnostic; only Render's meaning
         # changes).
-        if self.image_files and self._page_uses_reference_workflow(self.image_files[self.curr_img_idx]):
+        # Re-lettering a reference page keeps all three: Detect (its boxes
+        # decide what gets read and where the text goes), Recognize (reads
+        # the reference) and Translate (an LLM fixes the OCR's misreads).
+        if self.image_files and self._page_reveals_reference(self.image_files[self.curr_img_idx]):
             buttons[0].setEnabled(False)  # Detect
             buttons[1].setEnabled(False)  # Recognize
             buttons[2].setEnabled(False)  # Translate

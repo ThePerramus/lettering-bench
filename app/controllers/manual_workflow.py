@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 
 from typing import TYPE_CHECKING, Any, Sequence
 
@@ -16,9 +18,10 @@ from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.language_utils import to_canonical_language_name
 from modules.utils.pipeline_config import validate_ocr, validate_translator
 from modules.utils.textblock import sort_blk_list
-from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case
+from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case, set_texts_from_json
 from modules.utils.hyphenation import hyphenate_text
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
+from app.ui.messages import Messages
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +242,175 @@ class ManualWorkflowController:
         self.main.set_tool("box")
         self.main.on_manual_finished()
 
+    @staticmethod
+    def _flow_reference_text(text: str | None) -> str:
+        """OCR of already-lettered text comes back with the lettering's own
+        line breaks; join words split across lines and drop the breaks so
+        Render can re-wrap (and re-hyphenate) it to the box."""
+        text = (text or "").replace("\u00ad", "")
+        text = re.sub(r"(\w)[-\u2010\u2011]\s*\n\s*(?=\w)", r"\1", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _read_reference_text(
+        self, ocr: OCRProcessor, image, blk_list: list[TextBlock], lang: str,
+        single: TextBlock | None = None,
+    ) -> int:
+        """Re-letter mode: read the aligned reference (already translated)
+        inside this page's boxes and use the result as the translation. Same
+        rule as Recognize: on a partly done page only boxes without a
+        translation are read.
+
+        With a vision LLM as the translator, it reads the whole page in one
+        request (boxes given by position): seeing the page, it gets a
+        low-quality scan's lettering right far more often than an OCR working
+        on one cropped box at a time. Otherwise the OCR engine reads each
+        box, on copies so the boxes' source text and language are left
+        alone."""
+        if single is not None:
+            targets = [single]
+        else:
+            targets = [blk for blk in blk_list if not (blk.translation or "").strip()] or list(blk_list)
+        if not targets:
+            return 0
+        reader = self._reference_llm_reader(lang)
+        if reader is not None:
+            extra_context = self.main.settings_page.get_llm_settings()["extra_context"]
+            return self._correct_reference_text(
+                reader, image, blk_list, lang, extra_context, targets=targets, with_ocr=False)
+        copies = [blk.deep_copy() for blk in targets]
+        ocr.initialize(self.main, lang)
+        ocr.process(image, copies)
+        for blk, copy_blk in zip(targets, copies):
+            blk.translation = self._flow_reference_text(copy_blk.text)
+        logger.info("Re-letter: read %d of %d boxes from the reference", len(targets), len(blk_list))
+        return len(targets)
+
+    def _reference_llm_reader(self, lang: str) -> Translator | None:
+        """The configured translator, if it's an LLM that will be sent the
+        page image - i.e. one that can read the reference itself."""
+        try:
+            translator = Translator(self.main, lang, lang)
+        except Exception:
+            return None
+        engine = translator.engine
+        if (not translator.is_llm_engine
+                or not getattr(engine, "img_as_llm_input", False)
+                or not getattr(engine, "supports_images", True)):
+            return None
+        return translator
+
+    _CORRECT_SYSTEM_PROMPT = (
+        "You transcribe the lettering of a printed {lang} comic page.\n"
+        "You are given the page image and a JSON object. Each block has \"box\" "
+        "([x1, y1, x2, y2], the block's position in image pixels) and may have \"ocr\": an "
+        "OCR's reading of that box, which is unreliable (letters misread, words merged or "
+        "split, accents and punctuation lost or invented) - use it only as a hint.\n"
+        "For each block, read the lettering inside that box on the image and return the text "
+        "exactly as it is printed:\n"
+        "- DO NOT translate, rephrase, shorten or improve the wording; keep the printed "
+        "spelling, punctuation and letter case.\n"
+        "- Include all the text of the balloon or caption the box sits on, even if the box "
+        "cuts part of it off; do not include text from neighbouring balloons.\n"
+        "- Join words hyphenated across lines and return each block as a single line.\n"
+        "- If the box has no readable text, return an empty string.\n"
+        "Return only a JSON object with the same keys, each mapped to that block's text. "
+        "No explanations."
+    )
+
+    def _correct_reference_text(
+        self, translator: Translator, image, blk_list: list[TextBlock], lang: str,
+        extra_context: str = "", single: TextBlock | None = None,
+        targets: list[TextBlock] | None = None, with_ocr: bool = True,
+    ) -> int:
+        """Re-letter mode's Translate: the reference text needs no
+        translating, but the OCR of a low-quality scan misreads letters.
+        An LLM gets the reference page plus each box's position (and its
+        current text as a hint, when with_ocr), and returns what is actually
+        printed there. Also Recognize's whole-page read (with_ocr=False)."""
+        if targets is None:
+            targets = [single] if single is not None else [
+                blk for blk in blk_list if (blk.translation or "").strip()
+            ]
+        if not targets:
+            return 0
+        blocks = {}
+        for i, blk in enumerate(targets):
+            entry = {"box": [int(v) for v in blk.xyxy]}
+            if with_ocr and (blk.translation or "").strip():
+                entry["ocr"] = blk.translation
+            blocks[f"block_{i}"] = entry
+        user_prompt = f"{extra_context}\n{json.dumps(blocks, ensure_ascii=False, indent=2)}"
+        engine = translator.engine
+        response = engine._perform_translation(
+            user_prompt, self._CORRECT_SYSTEM_PROMPT.format(lang=translator.target_lang_en), image
+        )
+        set_texts_from_json(targets, response)
+        for blk in targets:
+            if isinstance(blk.translation, dict):
+                # The model echoed the input's shape instead of a plain string.
+                blk.translation = next((v for v in blk.translation.values() if isinstance(v, str)), "")
+            blk.translation = self._flow_reference_text(blk.translation)
+        logger.info(
+            "Re-letter: LLM %s %d of %d boxes from the reference page",
+            "corrected" if with_ocr else "read", len(targets), len(blk_list),
+        )
+        return len(targets)
+
+    def _correct_reference_page(self, single_block: bool) -> None:
+        file_path = self.main.image_files[self.main.curr_img_idx]
+        image = self.main.reference_text_image(file_path)
+        if image is None:
+            Messages.show_reference_not_aligned_error(self.main)
+            return
+        lang = to_canonical_language_name(self.main.t_combo.currentText(), self.main.lang_mapping)
+        if not validate_translator(self.main, lang):
+            return
+        translator = Translator(self.main, lang, lang)
+        if not translator.is_llm_engine:
+            Messages.show_reference_correct_needs_llm_error(self.main)
+            return
+        single = None
+        if single_block:
+            single = self.main.pipeline.get_selected_block()
+            if single is None:
+                logger.info("Re-letter correct: no block matches the selected box, nothing done")
+                return
+        extra_context = self.main.settings_page.get_llm_settings()["extra_context"]
+        self.main.loading.setVisible(True)
+        self.main.disable_hbutton_group()
+        before = self._translations_by_position(self.main.blk_list)
+        self.main.run_threaded(
+            lambda: self._correct_reference_text(
+                translator, image, self.main.blk_list, lang, extra_context, single),
+            None,
+            self.main.default_error_handler,
+            lambda: self.update_translated_text_items(single_block, before),
+        )
+
+    def _ocr_reference_page(self, single_block: bool) -> None:
+        file_path = self.main.image_files[self.main.curr_img_idx]
+        image = self.main.reference_text_image(file_path)
+        if image is None:
+            Messages.show_reference_not_aligned_error(self.main)
+            return
+        single = None
+        if single_block:
+            single = self.main.pipeline.get_selected_block()
+            if single is None:
+                logger.info("Re-letter single block: no block matches the selected box, nothing done")
+                return
+        if not self.main.blk_list:
+            return
+        lang = to_canonical_language_name(self.main.t_combo.currentText(), self.main.lang_mapping)
+        self.main.loading.setVisible(True)
+        self.main.disable_hbutton_group()
+        self.main.run_threaded(
+            lambda: self._read_reference_text(OCRProcessor(), image, self.main.blk_list, lang, single),
+            None,
+            self.main.default_error_handler,
+            lambda: self.finish_ocr_translate(single_block),
+        )
+
     def ocr(self, single_block: bool = False) -> None:
         if not validate_ocr(self.main):
             return
@@ -251,6 +423,15 @@ class ManualWorkflowController:
                 self.main.s_combo.currentText(),
                 self.main.lang_mapping,
             )
+            target_lang_fallback = to_canonical_language_name(
+                self.main.t_combo.currentText(),
+                self.main.lang_mapping,
+            )
+            # Computed here: warping touches the viewer for the current page.
+            reletter_images = {
+                path: self.main.reference_text_image(path)
+                for path in selected_paths if self.main._page_reletters_reference(path)
+            }
 
             def ocr_selected_pages() -> dict[str, list[TextBlock]]:
                 cache_manager = self.main.pipeline.cache_manager
@@ -262,6 +443,14 @@ class ManualWorkflowController:
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
                     if not blk_list:
+                        continue
+                    if file_path in reletter_images:
+                        if reletter_images[file_path] is None:
+                            logger.info("Re-letter: %s isn't aligned yet, skipped", file_path)
+                            continue
+                        lang = state.get("target_lang", target_lang_fallback)
+                        self._read_reference_text(ocr, reletter_images[file_path], blk_list, lang)
+                        results[file_path] = blk_list
                         continue
                     image = self._load_page_image(file_path)
                     if image is None:
@@ -307,6 +496,11 @@ class ManualWorkflowController:
             )
             return
 
+        if (not self.main.webtoon_mode and self.main.image_files
+                and self.main._page_reletters_reference(self.main.image_files[self.main.curr_img_idx])):
+            self._ocr_reference_page(single_block)
+            return
+
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
 
@@ -327,11 +521,23 @@ class ManualWorkflowController:
 
     def translate_image(self, single_block: bool = False) -> None:
         selected_paths = self._selected_page_paths()
+        if not (len(selected_paths) > 1 and not single_block):
+            if (not self.main.webtoon_mode and self.main.image_files
+                    and self.main._page_reletters_reference(self.main.image_files[self.main.curr_img_idx])):
+                self._correct_reference_page(single_block)
+                return
         if len(selected_paths) > 1 and not single_block:
+            # Computed here: warping touches the viewer for the current page.
+            reletter_images = {
+                path: self.main.reference_text_image(path)
+                for path in selected_paths if self.main._page_reletters_reference(path)
+            }
             has_any_text = False
             for file_path in selected_paths:
                 blk_list = self.main.image_states.get(file_path, {}).get("blk_list", [])
-                if is_there_text(blk_list):
+                if is_there_text(blk_list) or (
+                        file_path in reletter_images
+                        and any((blk.translation or "").strip() for blk in blk_list)):
                     has_any_text = True
                     break
             if not has_any_text:
@@ -371,6 +577,16 @@ class ManualWorkflowController:
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
                     if not blk_list:
+                        continue
+                    if file_path in reletter_images:
+                        target_lang = state.get("target_lang", target_lang_fallback)
+                        translator = Translator(self.main, target_lang, target_lang)
+                        if reletter_images[file_path] is None or not translator.is_llm_engine:
+                            logger.info("Re-letter: %s not aligned or no LLM translator, skipped", file_path)
+                            continue
+                        self._correct_reference_text(
+                            translator, reletter_images[file_path], blk_list, target_lang, extra_context)
+                        results[file_path] = blk_list
                         continue
                     image = self._load_page_image(file_path)
                     if image is None:

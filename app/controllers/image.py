@@ -334,6 +334,8 @@ class ImageStateController:
         self.main.reference_images.clear()
         self.main.reference_page_offsets = []
         self.main.reference_excluded_pages.clear()
+        self.main.reference_page_modes = {}
+        self.main.reference_default_mode = "reveal"
         self.main.image_viewer.reference_manager.cancel()
         self.main._sync_reference_alignment_buttons()
         self.main._update_reference_offset_label()

@@ -471,6 +471,18 @@ class WorkspaceMixin:
             "have no counterpart in the reference book at all"))
         self.reference_excluded_checkbox.stateChanged.connect(self.toggle_reference_page_excluded)
 
+        reference_mode_lay = QtWidgets.QHBoxLayout()
+        self.reference_mode_combo = MComboBox().small()
+        self.reference_mode_combo.addItem(self.tr("Reveal Original"), "reveal")
+        self.reference_mode_combo.addItem(self.tr("Re-letter"), "reletter")
+        self.reference_mode_combo.setToolTip(self.tr(
+            "Reveal Original: Render Brings Over the Reference's Own Lettering.\n"
+            "Re-letter: Recognize Reads the Reference's Text and Render Letters It "
+            "in the Chosen Font (Editable)."))
+        self.reference_mode_combo.currentIndexChanged.connect(self.set_reference_mode)
+        reference_mode_lay.addWidget(MLabel(self.tr("Translated Text:")))
+        reference_mode_lay.addWidget(self.reference_mode_combo, 1)
+
         self.load_reference_button = self.create_tool_button(svg="ion--image-outline.svg", checkable=True)
         self.load_reference_button.setToolTip(self.tr(
             "Overlay This Page's Reference (from the Book Above, or Pick One) and Drag its Corners to Align It"))
@@ -539,6 +551,7 @@ class WorkspaceMixin:
         reference_section_layout.addLayout(ref_book_lay)
         reference_section_layout.addLayout(ref_preview_lay)
         reference_section_layout.addWidget(self.reference_excluded_checkbox)
+        reference_section_layout.addLayout(reference_mode_lay)
         reference_section_layout.addWidget(self.reference_opacity_label)
         reference_section_layout.addWidget(self.reference_opacity_slider)
         self.reference_section_widget.setVisible(False)
