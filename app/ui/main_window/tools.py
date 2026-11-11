@@ -228,22 +228,63 @@ class ToolStateMixin:
             matrix = imk.get_perspective_transform(src, dst)
             entry['warped'] = imk.warp_perspective(ref_image, matrix, (out_w, out_h))
         except Exception:
-            pass
+            return
+        self._touch_warped(file_path)
 
-    def _sync_reveal_source(self):
-        """Keep image_viewer.reveal_source (what the reveal pencil samples
-        from) in lockstep with whatever confirmed alignment - if any - exists
-        for the page currently on screen."""
+    # A warped reference is a full page-sized RGB array (tens of MB). Only
+    # the most recently used ones are kept; the rest are dropped and
+    # recomputed from ref_path + corners if they're needed again.
+    WARPED_CACHE_PAGES = 2
+
+    def _touch_warped(self, file_path: str):
+        recent = getattr(self, "_warped_recent", None)
+        if recent is None:
+            recent = self._warped_recent = []
+        if file_path in recent:
+            recent.remove(file_path)
+        recent.append(file_path)
+        while len(recent) > self.WARPED_CACHE_PAGES:
+            entry = self.reference_images.get(recent.pop(0))
+            if entry is not None:
+                entry['warped'] = None
+
+    def _load_reveal_source(self):
+        """Warp the current page's reference (if not cached) and hand it to
+        the viewer for the reveal pencil."""
         if not self.image_files:
             self.image_viewer.reveal_source = None
-            self.reveal_pencil_button.setEnabled(False)
             return
         file_path = self.image_files[self.curr_img_idx]
         self._ensure_warped(file_path)
         entry = self.reference_images.get(file_path)
         warped = entry.get('warped') if entry else None
+        if warped is not None:
+            self._touch_warped(file_path)
         self.image_viewer.reveal_source = warped
-        self.reveal_pencil_button.setEnabled(warped is not None)
+
+    def _sync_reveal_source(self):
+        """Keep image_viewer.reveal_source (what the reveal pencil samples
+        from) in lockstep with whatever confirmed alignment - if any - exists
+        for the page currently on screen. The warp itself (read the reference
+        + a full-page perspective warp) is only done when something needs it:
+        here if the reveal pencil is the active tool, otherwise when it gets
+        picked (set_tool), on Render, or on Recognize in re-letter mode - not
+        on every page switch."""
+        if not self.image_files:
+            self.image_viewer.reveal_source = None
+            self.reveal_pencil_button.setEnabled(False)
+            return
+        file_path = self.image_files[self.curr_img_idx]
+        entry = self.reference_images.get(file_path)
+        aligned = bool(entry) and (
+            entry.get('warped') is not None
+            or bool(entry.get('ref_path') and entry.get('corners'))
+        )
+        self.reveal_pencil_button.setEnabled(aligned)
+        if aligned and self.image_viewer.current_tool == 'reveal_pencil':
+            self._load_reveal_source()
+        else:
+            self.image_viewer.reveal_source = entry.get('warped') if entry else None
 
     def _page_uses_reference_workflow(self, file_path: str) -> bool:
         """True when this page should skip Recognize/Translate and have
@@ -579,19 +620,43 @@ class ToolStateMixin:
             self.reference_preview_label.setText(self.tr("(no preview)"))
             return
         try:
-            ensure_path_materialized(ref_path)
-            img = imk.read_image(ref_path)
-            if img is None:
-                raise ValueError("could not read reference image")
-            h, w = img.shape[:2]
-            qimage = QtGui.QImage(img.data, w, h, img.strides[0],
-                                   QtGui.QImage.Format.Format_RGB888).copy()
-            pixmap = QtGui.QPixmap.fromImage(qimage).scaledToWidth(
-                140, QtCore.Qt.TransformationMode.SmoothTransformation)
+            cache = getattr(self, "_reference_thumb_cache", None)
+            if cache is None:
+                cache = self._reference_thumb_cache = {}
+            pixmap = cache.get(ref_path)
+            if pixmap is None:
+                ensure_path_materialized(ref_path)
+                pixmap = self._read_reference_thumbnail(ref_path)
+                if len(cache) >= 64:
+                    cache.pop(next(iter(cache)))
+                cache[ref_path] = pixmap
             self.reference_preview_label.setPixmap(pixmap)
         except Exception:
             self.reference_preview_label.clear()
             self.reference_preview_label.setText(self.tr("(preview unavailable)"))
+
+    @staticmethod
+    def _read_reference_thumbnail(ref_path: str) -> QtGui.QPixmap:
+        """140px-wide thumbnail. Decoded at reduced size where the format
+        allows it (JPEG), instead of decoding the whole page just to shrink
+        it - this runs on every page switch."""
+        reader = QtGui.QImageReader(ref_path)
+        reader.setAutoTransform(True)
+        size = reader.size()
+        if size.isValid() and size.width() > 0:
+            reader.setScaledSize(QtCore.QSize(140, max(1, round(size.height() * 140 / size.width()))))
+        qimage = reader.read()
+        if not qimage.isNull():
+            return QtGui.QPixmap.fromImage(qimage)
+
+        img = imk.read_image(ref_path)
+        if img is None:
+            raise ValueError("could not read reference image")
+        h, w = img.shape[:2]
+        qimage = QtGui.QImage(img.data, w, h, img.strides[0],
+                               QtGui.QImage.Format.Format_RGB888).copy()
+        return QtGui.QPixmap.fromImage(qimage).scaledToWidth(
+            140, QtCore.Qt.TransformationMode.SmoothTransformation)
 
     def _resolve_reference_book_page(self) -> str | None:
         """The reference-book page paired with the currently displayed page,
@@ -730,7 +795,10 @@ class ToolStateMixin:
             return [((x1 + x2) / 2.0, (y1 + y2) / 2.0) for x1, y1, x2, y2 in boxes]
 
         try:
-            detector = TextBlockDetector(self.settings_page)
+            block_detection = self.pipeline.block_detection
+            if block_detection.block_detector_cache is None:
+                block_detection.block_detector_cache = TextBlockDetector(self.settings_page)
+            detector = block_detection.block_detector_cache
             # Reuse an already-detected page's blocks instead of re-running
             # detection on it - the reference image never has one to reuse.
             hq_state_blocks = self.image_states.get(file_path, {}).get('blk_list')
@@ -860,6 +928,7 @@ class ToolStateMixin:
             'corners': corners,
             'warped': warped,
         }
+        self._touch_warped(file_path)
         self.load_reference_button.setChecked(False)
         self.confirm_reference_button.setEnabled(False)
         self.reset_reference_button.setEnabled(False)
@@ -878,6 +947,8 @@ class ToolStateMixin:
     def set_tool(self, tool_name: str):
         self.image_viewer.unsetCursor()
         self.image_viewer.set_tool(tool_name)
+        if tool_name == "reveal_pencil":
+            self._load_reveal_source()
 
         for name, button in self.tool_buttons.items():
             if name != tool_name:
@@ -920,9 +991,16 @@ class ToolStateMixin:
             self.image_viewer.drawing_manager.set_reveal_pencil_size(size, size)
 
         if self.image_viewer.hasPhoto():
-            image = self.image_viewer.get_image_array()
-            if image is not None:
-                h, w = image.shape[:2]
+            # Only the page's size is needed; get_image_array() would composite
+            # the whole page (plus patches) on every slider step.
+            if self.image_viewer.webtoon_mode:
+                image = self.image_viewer.get_image_array()
+                dims = image.shape[1::-1] if image is not None else None
+            else:
+                rect = self.image_viewer.photo.boundingRect()
+                dims = (rect.width(), rect.height())
+            if dims is not None:
+                w, h = dims
                 scaled_size = self.scale_size(size, w, h)
 
                 if current_tool in {"brush", "eraser", "pencil", "patch_eraser", "reveal_pencil"}:

@@ -509,9 +509,20 @@ class TextController:
                 lambda item: item.set_font_size(font_size),
             )
 
+    @staticmethod
+    def _parse_number(text: str, default: float) -> float:
+        """The editable dropdowns take typed values: accept a decimal comma
+        ("0,7") and fall back instead of raising on anything unparseable."""
+        try:
+            return float((text or "").strip().replace(",", "."))
+        except ValueError:
+            return default
+
     def on_line_spacing_change(self, line_spacing: str):
         if self._selected_text_items() and line_spacing:
-            spacing = float(line_spacing)
+            spacing = self._parse_number(line_spacing, 0.0)
+            if spacing <= 0:
+                return
             self._apply_format_to_selected(
                 "change_line_spacing",
                 lambda item: item.set_line_spacing(spacing),
@@ -589,7 +600,7 @@ class TextController:
                 f"background-color: {outline_color.name()}; border: none; border-radius: 5px;"
             )
             self.main.outline_font_color_button.setProperty('selected_color', outline_color.name())
-            outline_width = float(self.main.outline_width_dropdown.currentText())
+            outline_width = self._parse_number(self.main.outline_width_dropdown.currentText(), 1.0)
 
             if self._selected_text_items() and self.main.outline_checkbox.isChecked():
                 self._apply_format_to_selected(
@@ -599,7 +610,7 @@ class TextController:
 
     def on_outline_width_change(self, outline_width):
         if self._selected_text_items() and self.main.outline_checkbox.isChecked():
-            outline_width = float(self.main.outline_width_dropdown.currentText())
+            outline_width = self._parse_number(self.main.outline_width_dropdown.currentText(), 1.0)
             color_str = self.main.outline_font_color_button.property('selected_color')
             color = QColor(color_str)
             self._apply_format_to_selected(
@@ -616,7 +627,7 @@ class TextController:
                     lambda item: item.set_outline(None, None),
                 )
             else:
-                outline_width = float(self.main.outline_width_dropdown.currentText())
+                outline_width = self._parse_number(self.main.outline_width_dropdown.currentText(), 1.0)
                 color_str = self.main.outline_font_color_button.property('selected_color')
                 color = QColor(color_str)
                 self._apply_format_to_selected(
@@ -809,9 +820,9 @@ class TextController:
             context = self.main.manual_workflow_ctrl._prepare_multi_page_context(selected_paths)
             render_settings = self.render_settings()
             upper = render_settings.upper_case
-            line_spacing = float(self.main.line_spacing_dropdown.currentText())
+            line_spacing = self._parse_number(self.main.line_spacing_dropdown.currentText(), 1.0)
             font_family = self.main.font_dropdown.currentText()
-            outline_width = float(self.main.outline_width_dropdown.currentText())
+            outline_width = self._parse_number(self.main.outline_width_dropdown.currentText(), 1.0)
             bold = self.main.bold_button.isChecked()
             italic = self.main.italic_button.isChecked()
             underline = self.main.underline_button.isChecked()
@@ -984,9 +995,9 @@ class TextController:
             render_settings = self.render_settings()
             upper = render_settings.upper_case
 
-            line_spacing = float(self.main.line_spacing_dropdown.currentText())
+            line_spacing = self._parse_number(self.main.line_spacing_dropdown.currentText(), 1.0)
             font_family = self.main.font_dropdown.currentText()
-            outline_width = float(self.main.outline_width_dropdown.currentText())
+            outline_width = self._parse_number(self.main.outline_width_dropdown.currentText(), 1.0)
 
             bold = self.main.bold_button.isChecked()
             italic = self.main.italic_button.isChecked()

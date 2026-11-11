@@ -105,7 +105,7 @@ class GPTOCR(OCREngine):
                 self.api_base_url,
                 headers=headers,
                 data=json.dumps(payload),
-                timeout=20
+                timeout=60
             )
             response.raise_for_status()
         except requests.exceptions.RequestException as e:

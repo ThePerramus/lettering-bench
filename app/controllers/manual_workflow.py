@@ -387,6 +387,25 @@ class ManualWorkflowController:
             lambda: self.update_translated_text_items(single_block, before),
         )
 
+    def _reletter_image_getters(self, paths: list[str]) -> dict:
+        """{page: callable returning its aligned reference} for the re-letter
+        pages among paths. A warped reference is a full page-sized array, so
+        with many pages selected they're produced one at a time when the
+        worker reaches each page, not all up front. The current page's is the
+        exception: warping it reads the viewer, which must stay on this
+        thread."""
+        getters = {}
+        current = self.main.image_files[self.main.curr_img_idx] if self.main.image_files else None
+        for path in paths:
+            if not self.main._page_reletters_reference(path):
+                continue
+            if path == current:
+                image = self.main.reference_text_image(path)
+                getters[path] = lambda image=image: image
+            else:
+                getters[path] = lambda path=path: self.main.reference_text_image(path)
+        return getters
+
     def _ocr_reference_page(self, single_block: bool) -> None:
         file_path = self.main.image_files[self.main.curr_img_idx]
         image = self.main.reference_text_image(file_path)
@@ -427,11 +446,7 @@ class ManualWorkflowController:
                 self.main.t_combo.currentText(),
                 self.main.lang_mapping,
             )
-            # Computed here: warping touches the viewer for the current page.
-            reletter_images = {
-                path: self.main.reference_text_image(path)
-                for path in selected_paths if self.main._page_reletters_reference(path)
-            }
+            reletter_images = self._reletter_image_getters(selected_paths)
 
             def ocr_selected_pages() -> dict[str, list[TextBlock]]:
                 cache_manager = self.main.pipeline.cache_manager
@@ -445,11 +460,12 @@ class ManualWorkflowController:
                     if not blk_list:
                         continue
                     if file_path in reletter_images:
-                        if reletter_images[file_path] is None:
+                        reference = reletter_images[file_path]()
+                        if reference is None:
                             logger.info("Re-letter: %s isn't aligned yet, skipped", file_path)
                             continue
                         lang = state.get("target_lang", target_lang_fallback)
-                        self._read_reference_text(ocr, reletter_images[file_path], blk_list, lang)
+                        self._read_reference_text(ocr, reference, blk_list, lang)
                         results[file_path] = blk_list
                         continue
                     image = self._load_page_image(file_path)
@@ -527,11 +543,7 @@ class ManualWorkflowController:
                 self._correct_reference_page(single_block)
                 return
         if len(selected_paths) > 1 and not single_block:
-            # Computed here: warping touches the viewer for the current page.
-            reletter_images = {
-                path: self.main.reference_text_image(path)
-                for path in selected_paths if self.main._page_reletters_reference(path)
-            }
+            reletter_images = self._reletter_image_getters(selected_paths)
             has_any_text = False
             for file_path in selected_paths:
                 blk_list = self.main.image_states.get(file_path, {}).get("blk_list", [])
@@ -581,11 +593,12 @@ class ManualWorkflowController:
                     if file_path in reletter_images:
                         target_lang = state.get("target_lang", target_lang_fallback)
                         translator = Translator(self.main, target_lang, target_lang)
-                        if reletter_images[file_path] is None or not translator.is_llm_engine:
+                        reference = reletter_images[file_path]() if translator.is_llm_engine else None
+                        if reference is None:
                             logger.info("Re-letter: %s not aligned or no LLM translator, skipped", file_path)
                             continue
                         self._correct_reference_text(
-                            translator, reletter_images[file_path], blk_list, target_lang, extra_context)
+                            translator, reference, blk_list, target_lang, extra_context)
                         results[file_path] = blk_list
                         continue
                     image = self._load_page_image(file_path)

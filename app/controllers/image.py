@@ -1381,18 +1381,29 @@ class ImageStateController:
     def apply_inpaint_patches(self, patches):
         file_path = self.main.image_files[self.main.curr_img_idx]
 
-        to_insert = []
-        for patch in patches:
-            if patch.get('kind') == 'pencil':
-                leftover = self._merge_pencil_into_existing_patches(patch, file_path)
-                if leftover is not None:
-                    to_insert.append(leftover)
-            else:
-                to_insert.append(patch)
+        # One pencil stroke can turn into several commands (a merge into each
+        # Clean patch it overlaps, plus a new patch for the rest); group them
+        # so a single Undo takes back the whole stroke.
+        stack = self.main.undo_group.activeStack()
+        has_pencil = any(patch.get('kind') == 'pencil' for patch in patches)
+        if has_pencil:
+            stack.beginMacro("Pencil stroke")
+        try:
+            to_insert = []
+            for patch in patches:
+                if patch.get('kind') == 'pencil':
+                    leftover = self._merge_pencil_into_existing_patches(patch, file_path)
+                    if leftover is not None:
+                        to_insert.append(leftover)
+                else:
+                    to_insert.append(patch)
 
-        if to_insert:
-            command = PatchInsertCommand(self.main, to_insert, file_path)
-            self.main.undo_group.activeStack().push(command)
+            if to_insert:
+                command = PatchInsertCommand(self.main, to_insert, file_path)
+                stack.push(command)
+        finally:
+            if has_pencil:
+                stack.endMacro()
 
     def _merge_pencil_into_existing_patches(self, patch, file_path):
         """A pencil stroke drawn over a not-yet-revealed Clean patch is

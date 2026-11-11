@@ -352,25 +352,17 @@ class DrawingManager:
 
         self._scene.removeItem(item)
 
-        base_rgb = self.viewer.get_image_array(include_patches=True)
-        if base_rgb is None:
-            return
-
-        patch_rgb = base_rgb[y1:y2, x1:x2]
-        if patch_rgb.shape[:2] != (h, w):
-            return
-
         color = self.pencil_color
         # Real alpha, opaque only where the stroke actually landed - not a
         # flat opaque rectangle - so tools that reason about "what's really
         # drawn here" (the patch eraser's topmost-patch peeling, auto-reveal's
         # patch selection) see this correction's true shape instead of its
-        # whole bounding box. Visually identical either way while nothing
-        # underneath changes, since the untouched pixels just show through.
+        # whole bounding box. Pixels outside the stroke are fully transparent,
+        # so what's under them never needs to be read back from the page.
+        stroke = mask == 255
         patch_rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        patch_rgba[..., :3] = patch_rgb
-        patch_rgba[mask == 255, :3] = (color.red(), color.green(), color.blue())
-        patch_rgba[..., 3] = np.where(mask == 255, 255, 0).astype(np.uint8)
+        patch_rgba[stroke, :3] = (color.red(), color.green(), color.blue())
+        patch_rgba[stroke, 3] = 255
 
         patch = {'bbox': [x1, y1, w, h], 'image': patch_rgba, 'kind': 'pencil'}
         self.viewer.pencil_patch_ready.emit(patch)
@@ -493,21 +485,13 @@ class DrawingManager:
 
         self._scene.removeItem(item)
 
-        base_rgb = self.viewer.get_image_array(include_patches=True)
-        if base_rgb is None:
-            return
-
-        patch_rgb = base_rgb[y1:y2, x1:x2]
-        if patch_rgb.shape[:2] != (h, w):
-            return
-
         ref_crop = reveal_source[y1:y2, x1:x2, :3]
         # Real alpha, opaque only where the stroke actually landed - see the
         # matching comment in _commit_pencil_stroke() for why.
+        stroke = mask == 255
         patch_rgba = np.zeros((h, w, 4), dtype=np.uint8)
-        patch_rgba[..., :3] = patch_rgb
-        patch_rgba[mask == 255, :3] = ref_crop[mask == 255]
-        patch_rgba[..., 3] = np.where(mask == 255, 255, 0).astype(np.uint8)
+        patch_rgba[stroke, :3] = ref_crop[stroke]
+        patch_rgba[stroke, 3] = 255
 
         patch = {'bbox': [x1, y1, w, h], 'image': patch_rgba, 'kind': 'reveal_pencil'}
         self.viewer.pencil_patch_ready.emit(patch)
@@ -611,17 +595,25 @@ class DrawingManager:
         if self.viewer.webtoon_mode or not self.viewer.hasPhoto():
             return None
 
-        image = self.viewer.get_image_array(include_patches=True)
-        if image is None:
-            return None
-
+        photo = self.viewer.photo.pixmap()
         x, y = int(scene_pos.x()), int(scene_pos.y())
-        h, w = image.shape[:2]
-        if not (0 <= x < w and 0 <= y < h):
+        if not (0 <= x < photo.width() and 0 <= y < photo.height()):
             return None
 
-        r, g, b = (int(v) for v in image[y, x][:3])
-        self.set_pencil_color(QColor(r, g, b))
+        # Composite just that one pixel (page, then patches bottom-to-top, the
+        # same order get_image_array() uses) instead of the whole page.
+        pixel = QImage(1, 1, QImage.Format.Format_RGB32)
+        pixel.fill(0)
+        painter = QPainter(pixel)
+        painter.translate(-x, -y)
+        painter.drawPixmap(0, 0, photo)
+        for it in reversed(self._scene.items(QtCore.QRectF(x, y, 1, 1))):
+            if isinstance(it, QGraphicsPixmapItem) and it is not self.viewer.photo and it.data(0) is not None:
+                pos = it.pos()
+                painter.drawPixmap(int(pos.x()), int(pos.y()), it.pixmap())
+        painter.end()
+
+        self.set_pencil_color(pixel.pixelColor(0, 0))
         return self.pencil_color
 
     def create_inpaint_cursor(self, cursor_type, size):

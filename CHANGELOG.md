@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-68 commits, 51 files touched, roughly +4,330/−350 lines relative to `v2.8.9`.
+69 commits, 52 files touched, roughly +4,470/−360 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -84,6 +84,8 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 - **Custom OCR engine** — any OpenAI-compatible vision endpoint (URL, model, API key), mirroring
   the existing Custom translator; works with e.g. Gemini's OpenAI-compatible API.
+- **Longer timeout for LLM OCR** — GPT, Gemini and Custom OCR requests wait 60 s instead of 20 s
+  before giving up.
 
 ## Clean (inpainting) quality
 
@@ -125,9 +127,24 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   Multi-page Render now uses the same live wrap too.
 - **A newly drawn text box is selected right away**, so source/translation text typed next goes
   to it instead of to whichever box was selected before.
+- **One Undo per pencil stroke** — a stroke over several cleaned areas used to take several undos.
+- **Decimal comma accepted** in the line-spacing and outline-width boxes ("0,7" used to raise an
+  error).
 - **The eraser matches its preview circle** — it used to erase twice as wide as the circle shown.
 - OCR, Translate and Render now log the cases where they used to stop silently, so a step that
   "does nothing" can be traced in `crash_logs`.
+
+## Memory & performance
+
+- **Aligned reference pages no longer pile up in memory** — each visited page used to keep its
+  full-size warped reference (tens of MB) for the rest of the session; only the two most recent
+  are kept now, and with several re-letter pages selected they're loaded one at a time.
+- **Faster page switches on reference pages** — the reference is only read and warped when
+  something needs it (reveal pencil, Render, Recognize), and its thumbnail is decoded at reduced
+  size and cached, instead of both being redone on every page switch.
+- **Lighter paint tools** — a pencil or reveal-pencil stroke, the eyedropper, and each step of the
+  tool-size slider no longer recomposite the whole page with all its patches.
+- **Automatic alignment reuses the loaded text detector** instead of building a new one per click.
 
 ## Stability fixes
 
