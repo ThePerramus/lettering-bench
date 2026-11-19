@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import requests
 import json
@@ -5,6 +7,11 @@ import json
 from .base import OCREngine
 from ..utils.textblock import TextBlock, adjust_text_line_coordinates
 from ..utils.translator_utils import MODEL_MAP
+
+logger = logging.getLogger(__name__)
+
+# A response with no text (see _get_gpt_ocr) is retried this many times.
+EMPTY_RESPONSE_RETRIES = 2
 
 
 class GPTOCR(OCREngine):
@@ -66,8 +73,30 @@ class GPTOCR(OCREngine):
         return blk_list
     
     def _get_gpt_ocr(self, base64_image: str) -> str:
+        """OCR one box. Some responses come back with no text at all: Gemini
+        (through its OpenAI-compatible API) answers a blocked request -
+        typically finish_reason "content_filter", which covers its
+        recitation filter on published text - with a message that has no
+        "content". That used to raise KeyError and abort the whole page.
+        Now it's retried a couple of times (the block isn't deterministic)
+        and then the box is left empty and logged, so the rest of the page
+        is still read and Recognize can be run again on just the empty
+        boxes."""
+        for attempt in range(EMPTY_RESPONSE_RETRIES + 1):
+            text, finish_reason = self._request_gpt_ocr(base64_image)
+            if text is not None:
+                return text
+            logger.warning(
+                "LLM OCR: response without text (finish_reason=%s), attempt %d of %d",
+                finish_reason, attempt + 1, EMPTY_RESPONSE_RETRIES + 1,
+            )
+        logger.warning("LLM OCR: giving up on this box, left empty")
+        return ""
+
+    def _request_gpt_ocr(self, base64_image: str) -> tuple[str | None, str | None]:
         """
         Get OCR result from GPT model using direct REST API call.
+        Returns (text, finish_reason); text is None if the response has none.
         
         Args:
             base64_image: Base64 encoded image
@@ -119,6 +148,11 @@ class GPTOCR(OCREngine):
             raise RuntimeError(error_msg) from e
 
         response_json = response.json()
-        text = response_json['choices'][0]['message']['content']
+        choices = response_json.get('choices') or [{}]
+        choice = choices[0] or {}
+        finish_reason = choice.get('finish_reason')
+        text = (choice.get('message') or {}).get('content')
+        if not isinstance(text, str):
+            return None, finish_reason
         # Replace newlines with spaces
-        return text.replace('\n', ' ') if '\n' in text else text
+        return (text.replace('\n', ' ') if '\n' in text else text), finish_reason

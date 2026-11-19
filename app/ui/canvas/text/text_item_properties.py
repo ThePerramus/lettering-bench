@@ -3,6 +3,7 @@ from typing import Optional, List, Any
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
 from app.ui.canvas.text_item import OutlineType
+from modules.utils.hyphenation import collapse_soft_hyphens
 
 @dataclass
 class TextItemProperties:
@@ -41,7 +42,9 @@ class TextItemProperties:
         props = cls()
         
         # Basic text properties
-        props.text = data.get('text', '')
+        # Projects saved before hyphenate_text() was idempotent can hold runs
+        # of soft hyphens at each syllable break.
+        props.text = collapse_soft_hyphens(data.get('text', ''))
         props.font_family = data.get('font_family', '')
         props.font_size = data.get('font_size', 20)
         props.line_spacing = data.get('line_spacing', 1.2)

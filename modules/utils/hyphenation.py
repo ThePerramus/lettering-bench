@@ -21,6 +21,19 @@ _MIN_WORD_LEN = 5
 
 _word_re = re.compile(r"\S+")
 
+# A soft hyphen, as a character or as the HTML entities Qt may save it as.
+_SOFT_HYPHEN_RUN_RE = re.compile(r"(?:\u00ad|&shy;|&#173;|&#x[aA][dD];){2,}")
+
+
+def collapse_soft_hyphens(text: str) -> str:
+    """Turns runs of soft hyphens back into one. Text that went through
+    hyphenate_text() more than once before it was idempotent piled several
+    up at each syllable break: invisible, but each one costs an extra arrow
+    or Backspace press."""
+    if not text or not isinstance(text, str):
+        return text
+    return _SOFT_HYPHEN_RUN_RE.sub("\u00ad", text)
+
 
 def _get_dictionary(lang_code: str | None):
     if not lang_code:
@@ -60,6 +73,10 @@ def hyphenate_text(text: str, lang_code: str | None) -> str:
     dic = _get_dictionary(lang_code)
     if dic is None:
         return text
+
+    # Re-render / re-translate feed already hyphenated text back in: drop the
+    # old breaks first, or every pass adds another soft hyphen at each one.
+    text = text.replace("\u00ad", "")
 
     def _hyphenate_word(match: re.Match) -> str:
         word = match.group(0)

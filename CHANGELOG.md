@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-69 commits, 52 files touched, roughly +4,470/−360 lines relative to `v2.8.9`.
+70 commits, 53 files touched, roughly +4,530/−360 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -86,6 +86,9 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   the existing Custom translator; works with e.g. Gemini's OpenAI-compatible API.
 - **Longer timeout for LLM OCR** — GPT, Gemini and Custom OCR requests wait 60 s instead of 20 s
   before giving up.
+- **An empty LLM OCR answer no longer aborts the page** — a box the model returns no text for
+  (e.g. a false detection on artwork, or a filtered response) is retried twice, then left empty
+  and logged with the model's reason, and the rest of the page is still read.
 
 ## Clean (inpainting) quality
 
@@ -127,6 +130,10 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   Multi-page Render now uses the same live wrap too.
 - **A newly drawn text box is selected right away**, so source/translation text typed next goes
   to it instead of to whichever box was selected before.
+- **No more piled-up hidden hyphens** — re-rendering or re-translating added another invisible
+  soft hyphen at every syllable break each time, so moving the cursor or deleting needed several
+  key presses per break. Hyphenation now replaces the old breaks, and runs of them in existing
+  projects are collapsed to one when a page loads.
 - **One Undo per pencil stroke** — a stroke over several cleaned areas used to take several undos.
 - **Decimal comma accepted** in the line-spacing and outline-width boxes ("0,7" used to raise an
   error).
