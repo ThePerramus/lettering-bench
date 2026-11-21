@@ -252,9 +252,23 @@ class NavRailMixin:
         return separator
 
     def _set_page_list_panel_visible(self, visible: bool):
+        # The page list and the search panel share the left sidebar: showing
+        # the page list closes search, and the sidebar stays open while
+        # either of them is shown.
+        search_btn = getattr(self, "search_sidebar_button", None)
+        if visible and search_btn is not None and search_btn.isChecked():
+            self.hide_search_sidebar()
+        self._sync_left_sidebar_visibility()
+
+    def _sync_left_sidebar_visibility(self):
         left_widget = getattr(self, "left_widget", None)
-        if left_widget is not None:
-            left_widget.setVisible(visible)
+        if left_widget is None:
+            return
+        page_list_btn = getattr(self, "page_list_toggle_button", None)
+        search_btn = getattr(self, "search_sidebar_button", None)
+        page_list_on = page_list_btn is None or page_list_btn.isChecked()
+        search_on = search_btn is not None and search_btn.isChecked()
+        left_widget.setVisible(page_list_on or search_on)
 
     def _set_search_sidebar_visible(self, visible: bool):
         if not hasattr(self, "search_panel") or not hasattr(self, "page_list"):
@@ -264,6 +278,10 @@ class NavRailMixin:
             self.page_list.setVisible(not bool(visible))
         except Exception:
             return
+        # The search panel lives in the same sidebar as the page list, which
+        # can be collapsed on its own (page_list_toggle_button) - open the
+        # sidebar for search even then, and fold it back afterwards.
+        self._sync_left_sidebar_visibility()
 
         if visible:
             try:

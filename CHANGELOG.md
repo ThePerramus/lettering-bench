@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-70 commits, 53 files touched, roughly +4,530/−360 lines relative to `v2.8.9`.
+71 commits, 53 files touched, roughly +4,560/−360 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -134,6 +134,11 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   soft hyphen at every syllable break each time, so moving the cursor or deleting needed several
   key presses per break. Hyphenation now replaces the old breaks, and runs of them in existing
   projects are collapsed to one when a page loads.
+- **Search / Replace opens again** — with the page list collapsed, the magnifier (and Ctrl+F)
+  opened the search panel inside the hidden sidebar, so nothing appeared; the sidebar now opens
+  for search and folds back afterwards.
+- **Search finds hyphenated words** — plain searches ignore the invisible syllable-break hyphens in
+  rendered translations, so "criterio" matches a box that wraps it as "cri-terio".
 - **One Undo per pencil stroke** — a stroke over several cleaned areas used to take several undos.
 - **Decimal comma accepted** in the line-spacing and outline-width boxes ("0,7" used to raise an
   error).

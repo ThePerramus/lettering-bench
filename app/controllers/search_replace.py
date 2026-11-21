@@ -107,7 +107,12 @@ def compile_search_pattern(opts: SearchOptions) -> re.Pattern[str]:
     if opts.regex:
         body = query
     else:
-        body = re.escape(query)
+        # Rendered translations carry invisible soft hyphens (U+00AD) at
+        # syllable breaks (see modules/utils/hyphenation.py): let any number
+        # of them sit between the typed characters, so "criterio" still
+        # finds "cri\u00adte\u00adrio". Match positions stay those of the
+        # real text, so highlighting and replacing are unaffected.
+        body = "\u00ad*".join(re.escape(ch) for ch in query)
 
     if opts.whole_word:
         body = rf"(?<!\w)(?:{body})(?!\w)"
