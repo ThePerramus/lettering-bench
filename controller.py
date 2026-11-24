@@ -34,6 +34,7 @@ from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
+from modules.utils.http_retry import TransientAPIError
 
 
 # Ensure any pre-declared mandatory models
@@ -596,9 +597,15 @@ class ComicTranslate(ComicTranslateUI):
 
     def default_error_handler(self, error_tuple: Tuple):
         exctype, value, traceback_str = error_tuple
-        
+
         # Handle specific exceptions
-        if exctype is InsufficientCreditsException:
+        if isinstance(exctype, type) and issubclass(exctype, TransientAPIError):
+            # 429/5xx/timeouts already retried for a while by post_with_retry:
+            # say so without a dialog that has to be clicked away.
+            status = getattr(value, "status_code", None)
+            Messages.show_ai_service_busy_error(self, f"HTTP {status}" if status else type(value).__name__)
+
+        elif exctype is InsufficientCreditsException:
             Messages.show_insufficient_credits_error(self, details=str(value))
             
         elif exctype is ContentFlaggedException:

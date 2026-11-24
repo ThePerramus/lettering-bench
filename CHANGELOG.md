@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-71 commits, 53 files touched, roughly +4,560/−360 lines relative to `v2.8.9`.
+72 commits, 58 files touched, roughly +4,700/−370 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -84,6 +84,12 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 - **Custom OCR engine** — any OpenAI-compatible vision endpoint (URL, model, API key), mirroring
   the existing Custom translator; works with e.g. Gemini's OpenAI-compatible API.
+- **Automatic retries for busy AI services** — a 429 (rate limit), 503 (overloaded) or other
+  temporary server error, or a timeout, from an OCR or translation LLM (GPT, Claude, Gemini,
+  Custom) is retried by itself, with growing waits (honoring the server's Retry-After), for up to
+  90 s. Only if it still fails does a non-blocking message appear instead of an error dialog to
+  dismiss; what was already done is kept, so running the step again continues where it stopped.
+  Gemini OCR no longer leaves boxes silently empty on an API error.
 - **Longer timeout for LLM OCR** — GPT, Gemini and Custom OCR requests wait 60 s instead of 20 s
   before giving up.
 - **An empty LLM OCR answer no longer aborts the page** — a box the model returns no text for

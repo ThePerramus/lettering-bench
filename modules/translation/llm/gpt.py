@@ -5,6 +5,7 @@ import json
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+from ...utils.http_retry import post_with_retry
 
 
 class GPTTranslation(BaseLLMTranslation):
@@ -94,7 +95,7 @@ class GPTTranslation(BaseLLMTranslation):
         Make API request and process response
         """
         try:
-            response = requests.post(
+            response = post_with_retry(
                 f"{self.api_base_url}/chat/completions",
                 headers=headers,
                 data=json.dumps(payload),

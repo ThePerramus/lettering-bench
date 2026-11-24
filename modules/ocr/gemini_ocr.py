@@ -4,6 +4,7 @@ import requests
 from .base import OCREngine
 from ..utils.textblock import TextBlock, adjust_text_line_coordinates
 from ..utils.translator_utils import MODEL_MAP
+from ..utils.http_retry import post_with_retry
 from app.ui.settings.settings_page import SettingsPage
 
 
@@ -125,7 +126,7 @@ class GeminiOCR(OCREngine):
         
         # Make POST request to Gemini API
         headers = {"Content-Type": "application/json"}
-        response = requests.post(
+        response = post_with_retry(
             url,
             headers=headers, 
             json=payload,
@@ -153,5 +154,6 @@ class GeminiOCR(OCREngine):
             # Remove any leading/trailing whitespace
             return result.strip()
         else:
-            print(f"API error: {response.status_code} {response.text}")
-            return ""
+            # Temporary errors (429/5xx) were already retried by
+            # post_with_retry; this is a permanent one (bad key, bad request).
+            raise RuntimeError(f"Gemini OCR request failed: {response.status_code} {response.text[:300]}")

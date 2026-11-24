@@ -7,6 +7,7 @@ import json
 from .base import OCREngine
 from ..utils.textblock import TextBlock, adjust_text_line_coordinates
 from ..utils.translator_utils import MODEL_MAP
+from ..utils.http_retry import post_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ class GPTOCR(OCREngine):
         
         # Make POST request to OpenAI API
         try:
-            response = requests.post(
+            response = post_with_retry(
                 self.api_base_url,
                 headers=headers,
                 data=json.dumps(payload),

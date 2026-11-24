@@ -5,6 +5,7 @@ import json
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+from ...utils.http_retry import post_with_retry
 
 
 class ClaudeTranslation(BaseLLMTranslation):
@@ -78,7 +79,7 @@ class ClaudeTranslation(BaseLLMTranslation):
             ]
 
         # Make the API request
-        response = requests.post(
+        response = post_with_retry(
             self.api_url,
             headers=self.headers,
             data=json.dumps(payload),

@@ -4,6 +4,7 @@ import requests
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+from ...utils.http_retry import post_with_retry
 
 
 class GeminiTranslation(BaseLLMTranslation):
@@ -107,7 +108,7 @@ class GeminiTranslation(BaseLLMTranslation):
             "Content-Type": "application/json"
         }
         
-        response = requests.post(
+        response = post_with_retry(
             url, 
             headers=headers, 
             json=payload,

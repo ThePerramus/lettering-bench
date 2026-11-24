@@ -118,6 +118,23 @@ class Messages:
         )
 
     @staticmethod
+    def show_ai_service_busy_error(parent, details: str = ""):
+        """Non-blocking: the AI service kept failing with a temporary error
+        even after the automatic retries. Whatever was already done stays
+        done, so running the step again picks up where it stopped."""
+        MMessage.warning(
+            text=QCoreApplication.translate(
+                "Messages",
+                "The AI service is busy or rate-limited and still failing after retrying "
+                "for a while ({}). What was already done is kept: run the step again to "
+                "continue."
+            ).format(details),
+            parent=parent,
+            duration=None,
+            closable=True
+        )
+
+    @staticmethod
     def show_insufficient_credits_error(parent, details: str = None):
         """
         Show an error message when the user has insufficient credits.
