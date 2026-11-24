@@ -22,6 +22,7 @@ from modules.utils.translator_utils import is_there_text, format_translations, s
 from modules.utils.hyphenation import hyphenate_text
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
 from app.ui.messages import Messages
+from modules.utils.progress import current_task, TaskCancelled
 
 logger = logging.getLogger(__name__)
 
@@ -379,13 +380,26 @@ class ManualWorkflowController:
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
         before = self._translations_by_position(self.main.blk_list)
-        self.main.run_threaded(
+        self.main.run_task_threaded(
+            self.main.tr("Correcting reference text"),
             lambda: self._correct_reference_text(
                 translator, image, self.main.blk_list, lang, extra_context, single),
             None,
             self.main.default_error_handler,
             lambda: self.update_translated_text_items(single_block, before),
         )
+
+    @staticmethod
+    def _keep_partial_on_cancel(fn, partial: dict):
+        """Multi-page steps: a cancel during a page's request (e.g. while
+        waiting to retry) ends the step with the pages finished so far,
+        instead of throwing them away."""
+        def run():
+            try:
+                return fn()
+            except TaskCancelled:
+                return partial
+        return run
 
     def _reletter_image_getters(self, paths: list[str]) -> dict:
         """{page: callable returning its aligned reference} for the re-letter
@@ -423,7 +437,8 @@ class ManualWorkflowController:
         lang = to_canonical_language_name(self.main.t_combo.currentText(), self.main.lang_mapping)
         self.main.loading.setVisible(True)
         self.main.disable_hbutton_group()
-        self.main.run_threaded(
+        self.main.run_task_threaded(
+            self.main.tr("Reading reference"),
             lambda: self._read_reference_text(OCRProcessor(), image, self.main.blk_list, lang, single),
             None,
             self.main.default_error_handler,
@@ -448,13 +463,22 @@ class ManualWorkflowController:
             )
             reletter_images = self._reletter_image_getters(selected_paths)
 
+            partial: dict[str, list[TextBlock]] = {}
+
             def ocr_selected_pages() -> dict[str, list[TextBlock]]:
                 cache_manager = self.main.pipeline.cache_manager
                 ocr = OCRProcessor()
                 ocr_model = self.main.settings_page.get_tool_selection("ocr")
                 device = resolve_device(self.main.settings_page.is_gpu_enabled())
-                results: dict[str, list[TextBlock]] = {}
-                for file_path in selected_paths:
+                results = partial
+                task = current_task()
+                task.set_pages(len(selected_paths))
+                for page_index, file_path in enumerate(selected_paths):
+                    # Cancel stops before the next page; pages already done
+                    # are kept (see _keep_partial_on_cancel).
+                    if task.cancelled:
+                        break
+                    task.at_page(page_index)
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
                     if not blk_list:
@@ -504,8 +528,9 @@ class ManualWorkflowController:
                 if results:
                     self.main.mark_project_dirty()
 
-            self.main.run_threaded(
-                ocr_selected_pages,
+            self.main.run_task_threaded(
+                self.main.tr("Recognizing text"),
+                self._keep_partial_on_cancel(ocr_selected_pages, partial),
                 on_ocr_ready,
                 self.main.default_error_handler,
                 lambda: self.finish_ocr_translate(single_block),
@@ -528,7 +553,8 @@ class ManualWorkflowController:
                 lambda: self.finish_ocr_translate(single_block),
             )
         else:
-            self.main.run_threaded(
+            self.main.run_task_threaded(
+                self.main.tr("Recognizing text"),
                 lambda: self.main.pipeline.OCR_image(single_block),
                 None,
                 self.main.default_error_handler,
@@ -582,10 +608,19 @@ class ManualWorkflowController:
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
             before = self._translations_by_position(self.main.blk_list)
 
+            partial: dict[str, list[TextBlock]] = {}
+
             def translate_selected_pages() -> dict[str, list[TextBlock]]:
                 cache_manager = self.main.pipeline.cache_manager
-                results: dict[str, list[TextBlock]] = {}
-                for file_path in selected_paths:
+                results = partial
+                task = current_task()
+                task.set_pages(len(selected_paths))
+                for page_index, file_path in enumerate(selected_paths):
+                    # Cancel stops before the next page; pages already done
+                    # are kept (see _keep_partial_on_cancel).
+                    if task.cancelled:
+                        break
+                    task.at_page(page_index)
                     state = self.main.image_states.get(file_path, {})
                     blk_list = state.get("blk_list", [])
                     if not blk_list:
@@ -649,8 +684,9 @@ class ManualWorkflowController:
                     self.main.batch_report_ctrl.resolve_translated_pages(list(results))
                     self.main.mark_project_dirty()
 
-            self.main.run_threaded(
-                translate_selected_pages,
+            self.main.run_task_threaded(
+                self.main.tr("Translating"),
+                self._keep_partial_on_cancel(translate_selected_pages, partial),
                 on_translation_ready,
                 self.main.default_error_handler,
                 lambda: self.update_translated_text_items(single_block, before),
@@ -680,7 +716,8 @@ class ManualWorkflowController:
                 lambda: self.update_translated_text_items(single_block, before),
             )
         else:
-            self.main.run_threaded(
+            self.main.run_task_threaded(
+                self.main.tr("Translating"),
                 lambda: self.main.pipeline.translate_image(single_block),
                 None,
                 self.main.default_error_handler,

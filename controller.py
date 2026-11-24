@@ -35,6 +35,7 @@ from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 from modules.utils.http_retry import TransientAPIError
+from modules.utils import progress
 
 
 # Ensure any pre-declared mandatory models
@@ -579,6 +580,68 @@ class ComicTranslate(ComicTranslateUI):
             callback, result_callback, error_callback, finished_callback, *args, **kwargs
         )
 
+    def run_task_threaded(self, label: str, callback: Callable, result_callback: Callable=None,
+                          error_callback: Callable=None, finished_callback: Callable=None):
+        """run_threaded() for a long manual step: shows the progress bar
+        (in place of the spinner) with a Cancel button while it runs. The
+        step reports progress through modules.utils.progress.current_task()."""
+        def tracked():
+            task = progress.start_task(label)
+            try:
+                return callback()
+            finally:
+                progress.end_task(task)
+                self._tracked_tasks_pending -= 1
+
+        self._tracked_tasks_pending = getattr(self, "_tracked_tasks_pending", 0) + 1
+        self._start_task_progress_polling()
+        return self.run_threaded(tracked, result_callback, error_callback, finished_callback)
+
+    def _start_task_progress_polling(self):
+        timer = getattr(self, "_task_progress_timer", None)
+        if timer is None:
+            timer = QtCore.QTimer(self)
+            timer.setInterval(200)
+            timer.timeout.connect(self._refresh_task_progress)
+            self._task_progress_timer = timer
+        if not timer.isActive():
+            timer.start()
+        self._refresh_task_progress()
+
+    def _refresh_task_progress(self):
+        task = progress.active_task()
+        widget = self.task_progress_widget
+        if task is None:
+            if getattr(self, "_tracked_tasks_pending", 0) <= 0:
+                widget.setVisible(False)
+                self._task_progress_timer.stop()
+            return
+        if not widget.isVisible():
+            self.task_progress_cancel_button.setEnabled(True)
+            self.task_progress_cancel_button.setText(self.tr("Cancel"))
+            widget.setVisible(True)
+            self._reposition_canvas_overlays()
+        # The bar replaces the spinner while a tracked step runs.
+        self.loading.setVisible(False)
+        text = task.status_text()
+        if text != self.task_progress_label.text():
+            self.task_progress_label.setText(text)
+            self._reposition_canvas_overlays()
+        fraction = task.fraction()
+        bar = self.task_progress_bar
+        if fraction is None:
+            bar.setRange(0, 0)  # busy indicator: nothing countable
+        else:
+            bar.setRange(0, 1000)
+            bar.setValue(int(fraction * 1000))
+
+    def cancel_tracked_task(self):
+        task = progress.active_task()
+        if task is not None:
+            task.cancel()
+            self.task_progress_cancel_button.setEnabled(False)
+            self.task_progress_cancel_button.setText(self.tr("Cancelling..."))
+
     def run_threaded_immediate(self, callback: Callable, result_callback: Callable=None,
                               error_callback: Callable=None, finished_callback: Callable=None,
                               *args, **kwargs):
@@ -599,7 +662,11 @@ class ComicTranslate(ComicTranslateUI):
         exctype, value, traceback_str = error_tuple
 
         # Handle specific exceptions
-        if isinstance(exctype, type) and issubclass(exctype, TransientAPIError):
+        if isinstance(exctype, type) and issubclass(exctype, progress.TaskCancelled):
+            # The user pressed Cancel: what was done is kept, nothing to report.
+            pass
+
+        elif isinstance(exctype, type) and issubclass(exctype, TransientAPIError):
             # 429/5xx/timeouts already retried for a while by post_with_retry:
             # say so without a dialog that has to be clicked away.
             status = getattr(value, "status_code", None)

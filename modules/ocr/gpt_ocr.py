@@ -8,6 +8,7 @@ from .base import OCREngine
 from ..utils.textblock import TextBlock, adjust_text_line_coordinates
 from ..utils.translator_utils import MODEL_MAP
 from ..utils.http_retry import post_with_retry
+from ..utils.progress import current_task, TaskCancelled
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,13 @@ class GPTOCR(OCREngine):
         Returns:
             List of updated TextBlock objects with recognized text
         """
+        # Per-box progress for the progress bar; Cancel stops before the next
+        # box (a request already sent can't be interrupted).
+        task = current_task()
+        task.set_items(len(blk_list))
         for blk in blk_list:
+            if task.cancelled:
+                break
             # Get box coordinates
             if blk.bubble_xyxy is not None:
                 x1, y1, x2, y2 = blk.bubble_xyxy
@@ -69,8 +76,12 @@ class GPTOCR(OCREngine):
                 img_to_gpt = self.encode_image(cropped_img)
                 
                 # Get OCR result from GPT
-                blk.text = self._get_gpt_ocr(img_to_gpt)
-                
+                try:
+                    blk.text = self._get_gpt_ocr(img_to_gpt)
+                except TaskCancelled:
+                    break
+            task.item_done()
+
         return blk_list
     
     def _get_gpt_ocr(self, base64_image: str) -> str:

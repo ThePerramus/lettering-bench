@@ -2,6 +2,7 @@ import hashlib
 import logging
 
 from modules.utils.translator_utils import has_translatable_content
+from modules.utils.progress import current_task
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,9 @@ class CacheManager:
 
     def _cache_ocr_results(self, cache_key, blk_list, processed_blk_list=None):
         """Cache OCR results for all blocks"""
+        if current_task().cancelled:
+            # Boxes skipped by Cancel would be cached as read-but-empty.
+            return
         try:
             block_results = {}
             # If we have separate processed blocks (with OCR results), use them for text
@@ -181,6 +185,8 @@ class CacheManager:
             
     def update_ocr_cache_for_block(self, cache_key, block):
         """Update or add a single block's OCR result to the cache."""
+        if current_task().cancelled:
+            return
         block_id = self._get_block_id(block)
         text = getattr(block, 'text', '') or ''
 
@@ -224,6 +230,8 @@ class CacheManager:
 
     def _cache_translation_results(self, cache_key, blk_list, processed_blk_list=None):
         """Cache translation results for all blocks"""
+        if current_task().cancelled:
+            return
         try:
             block_results = {}
             # If we have separate processed blocks (with translation results), use them for translation
@@ -263,6 +271,8 @@ class CacheManager:
 
     def update_translation_cache_for_block(self, cache_key, block):
         """Update or add a single block's translation result to the cache."""
+        if current_task().cancelled:
+            return
         block_id = self._get_block_id(block)
         translation = getattr(block, 'translation', '') or ''
         source_text = getattr(block, 'text', '') or ''

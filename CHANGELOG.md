@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-72 commits, 58 files touched, roughly +4,700/−370 lines relative to `v2.8.9`.
+73 commits, 60 files touched, roughly +5,080/−380 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -84,6 +84,14 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 - **Custom OCR engine** — any OpenAI-compatible vision endpoint (URL, model, API key), mirroring
   the existing Custom translator; works with e.g. Gemini's OpenAI-compatible API.
+- **Progress bar with Cancel for long steps** — OCR, Translate and the re-letter read/correct
+  show a progress bar in place of the spinner: the step, page and box being processed, elapsed
+  time, and a second line while a busy AI service is being retried ("Gemini busy (HTTP 503) -
+  retry 2 in 8 s"). It moves per box with the AI OCR engines and per page on multi-page
+  selections; a single request (one page's translation) shows a busy animation. Cancel stops
+  before the next box or page (or at once while waiting to retry) and keeps what was done;
+  unprocessed boxes aren't cached as read. The bar sits in the free space left of the
+  right-hand panels and grows with its text.
 - **Automatic retries for busy AI services** — a 429 (rate limit), 503 (overloaded) or other
   temporary server error, or a timeout, from an OCR or translation LLM (GPT, Claude, Gemini,
   Custom) is retried by itself, with growing waits (honoring the server's Retry-After), for up to

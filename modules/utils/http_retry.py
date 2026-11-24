@@ -16,6 +16,8 @@ import time
 
 import requests
 
+from .progress import current_task, TaskCancelled
+
 logger = logging.getLogger(__name__)
 
 # Statuses worth retrying: rate limited, or the server temporarily failing.
@@ -54,6 +56,21 @@ def _service_name(url: str) -> str:
         return url
 
 
+_SERVICE_NAMES = (
+    ("googleapis.com", "Gemini"),
+    ("openai.com", "OpenAI"),
+    ("anthropic.com", "Claude"),
+    ("deepseek.com", "DeepSeek"),
+)
+
+
+def _display_name(service: str) -> str:
+    for host_part, name in _SERVICE_NAMES:
+        if host_part in service:
+            return name
+    return service
+
+
 def post_with_retry(url: str, *, budget: float = RETRY_BUDGET_SECONDS, session=None, **kwargs) -> requests.Response:
     """requests.post() that retries temporary failures for up to `budget` seconds.
 
@@ -64,10 +81,13 @@ def post_with_retry(url: str, *, budget: float = RETRY_BUDGET_SECONDS, session=N
     """
     post = session.post if session is not None else requests.post
     service = _service_name(url)
+    task = current_task()
     start = time.monotonic()
     delay = _BACKOFF_START
     attempt = 0
     while True:
+        if task.cancelled:
+            raise TaskCancelled()
         attempt += 1
         try:
             response = post(url, **kwargs)
@@ -75,6 +95,8 @@ def post_with_retry(url: str, *, budget: float = RETRY_BUDGET_SECONDS, session=N
             response, problem, status = None, type(e).__name__, None
         else:
             if response.status_code not in RETRY_STATUSES:
+                if attempt > 1:
+                    task.set_note("")
                 return response
             problem, status = f"HTTP {response.status_code}", response.status_code
 
@@ -91,6 +113,7 @@ def post_with_retry(url: str, *, budget: float = RETRY_BUDGET_SECONDS, session=N
                 "AI request to %s still failing after %d attempts (%.0f s): %s %s",
                 service, attempt, elapsed, problem, detail,
             )
+            task.set_note("")
             raise TransientAPIError(
                 f"{service} is busy or unavailable ({problem}) - gave up after "
                 f"{attempt} attempts in {elapsed:.0f} s",
@@ -101,4 +124,5 @@ def post_with_retry(url: str, *, budget: float = RETRY_BUDGET_SECONDS, session=N
             "AI request to %s: %s, retrying in %.0f s (attempt %d)",
             service, problem, wait, attempt + 1,
         )
-        time.sleep(wait)
+        task.set_note(f"{_display_name(service)} busy ({problem}) - retry {attempt} in {wait:.0f} s")
+        task.sleep(wait)

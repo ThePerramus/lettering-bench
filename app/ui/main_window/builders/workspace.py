@@ -534,6 +534,34 @@ class WorkspaceMixin:
         self.loading.setParent(self.central_widget)
         self.loading.setVisible(False)
 
+        # Progress of a long manual step (OCR, translation, re-letter): takes
+        # the spinner's place at the canvas's top center while it runs (see
+        # ComicTranslate.run_task_threaded).
+        self.task_progress_widget = QtWidgets.QWidget(self.central_widget)
+        self.task_progress_widget.setObjectName("taskProgressOverlay")
+        self.task_progress_widget.setStyleSheet(
+            "QWidget#taskProgressOverlay { background-color: #2b2b2b; border: 1px solid #555555; border-radius: 4px; }"
+        )
+        self.task_progress_widget.setFixedWidth(420)
+        task_progress_layout = QtWidgets.QVBoxLayout(self.task_progress_widget)
+        task_progress_layout.setContentsMargins(10, 8, 10, 8)
+        task_progress_layout.setSpacing(6)
+        self.task_progress_label = MLabel("")
+        self.task_progress_label.setWordWrap(True)
+        task_progress_row = QtWidgets.QHBoxLayout()
+        self.task_progress_bar = QtWidgets.QProgressBar()
+        self.task_progress_bar.setTextVisible(False)
+        self.task_progress_bar.setFixedHeight(8)
+        self.task_progress_cancel_button = MPushButton(self.tr("Cancel")).small()
+        self.task_progress_cancel_button.setToolTip(self.tr(
+            "Stop after the current request; what's already done is kept"))
+        self.task_progress_cancel_button.clicked.connect(self.cancel_tracked_task)
+        task_progress_row.addWidget(self.task_progress_bar, 1)
+        task_progress_row.addWidget(self.task_progress_cancel_button)
+        task_progress_layout.addWidget(self.task_progress_label)
+        task_progress_layout.addLayout(task_progress_row)
+        self.task_progress_widget.setVisible(False)
+
         # Floats over the canvas, same as self.text_section_widget above -
         # anchored to the right panel's left edge, below the Text panel if
         # both happen to be open. Hidden by default; shown via
@@ -845,6 +873,7 @@ class WorkspaceMixin:
             self.loading.move((w - self.loading.width()) // 2, margin)
             self.loading.raise_()
         y = margin
+        right_limit = w
         for name in ("text_section_widget", "reference_section_widget", "paint_options_widget"):
             panel = getattr(self, name, None)
             if panel is None:
@@ -854,6 +883,21 @@ class WorkspaceMixin:
             panel.raise_()
             if panel.isVisibleTo(self.central_widget):
                 y += panel.height() + margin
+                right_limit = min(right_limit, panel.x())
+        if hasattr(self, "task_progress_widget"):
+            # Centered in the free area left of the right-hand panels, so it
+            # never sits under them; narrower if that area is small.
+            free = max(0, right_limit - margin)
+            width = max(220, min(420, free - 2 * margin))
+            progress_widget = self.task_progress_widget
+            progress_widget.setFixedWidth(width)
+            # The label wraps: let the height follow the text.
+            progress_widget.setFixedHeight(progress_widget.layout().heightForWidth(width)
+                                           if progress_widget.layout().hasHeightForWidth()
+                                           else progress_widget.sizeHint().height())
+            x = max(margin, (free - width) // 2)
+            progress_widget.move(x, margin)
+            progress_widget.raise_()
 
     def _reposition_text_flyout(self):
         self._reposition_canvas_overlays()
