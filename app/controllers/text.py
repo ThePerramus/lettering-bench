@@ -10,6 +10,7 @@ from PySide6 import QtCore
 from PySide6.QtGui import QColor, QTextCursor
 
 from app.ui.commands.textformat import TextFormatCommand
+from app.ui.dayu_widgets.message import MMessage
 from app.ui.commands.box import AddTextItemCommand, ResizeBlocksCommand
 from app.ui.commands.text_edit import TextEditCommand
 from app.ui.canvas.text_item import TextBlockItem
@@ -24,6 +25,7 @@ from modules.utils.image_utils import get_smart_text_color
 from modules.utils.common_utils import is_close
 from modules.utils.translator_utils import format_translations, is_renderable_translation
 from modules.utils.hyphenation import hyphenate_text
+from modules.utils.text_styles import (STYLE_KINDS, apply_style_to_item, block_kind, kind_label, save_default_styles, style_alignment, style_for_block, style_from_item, style_outline_color)
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +44,10 @@ class TextController:
             self.main.block_font_color_button,
             self.main.outline_font_color_button,
             self.main.outline_width_dropdown,
-            self.main.outline_checkbox
+            self.main.outline_checkbox,
+            self.main.text_style_combo,
         ]
+        self.refresh_text_style_labels()
         self._text_change_timer = QtCore.QTimer(self.main)
         self._text_change_timer.setSingleShot(True)
         self._text_change_timer.setInterval(400)
@@ -142,6 +146,19 @@ class TextController:
         direction = render_settings.direction
         vertical = is_vertical_block(blk, trg_lng_cd)
 
+        style = style_for_block(getattr(self.main, "text_styles", {}), blk)
+        if style:
+            font_family = style.get("font_family") or font_family
+            if style.get("text_color"):
+                text_color = get_smart_text_color(blk.font_color, QColor(style["text_color"]))
+            alignment = style_alignment(style)
+            line_spacing = float(style.get("line_spacing") or line_spacing)
+            outline_color = style_outline_color(style)
+            outline_width = float(style.get("outline_width") or outline_width)
+            bold = bool(style.get("bold"))
+            italic = bool(style.get("italic"))
+            underline = bool(style.get("underline"))
+
         properties = TextItemProperties(
             text=text,
             font_family=font_family,
@@ -236,7 +253,9 @@ class TextController:
         return [self.main.curr_tblock_item] if self.main.curr_tblock_item else []
 
     def _apply_format_to_selected(self, macro_name: str, apply_fn):
-        items = self._selected_text_items()
+        self._apply_format_to_items(self._selected_text_items(), macro_name, apply_fn)
+
+    def _apply_format_to_items(self, items, macro_name: str, apply_fn):
         if not items:
             return
 
@@ -589,6 +608,75 @@ class TextController:
                 lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignJustify),
             )
 
+    # --- box types and their styles (modules/utils/text_styles.py) -------
+
+    def refresh_text_style_labels(self):
+        """Fills the Type combo; types with a saved style get a check mark."""
+        combo = self.main.text_style_combo
+        current = combo.currentData() if combo.count() else ""
+        styles = getattr(self.main, "text_styles", {}) or {}
+        with QtCore.QSignalBlocker(combo):
+            combo.clear()
+            combo.addItem(self.main.tr("(No type)"), "")
+            for key, label in STYLE_KINDS:
+                text = self.main.tr(label) + ("  \u2713" if key in styles else "")
+                combo.addItem(text, key)
+            combo.setCurrentIndex(max(0, combo.findData(current or "")))
+
+    def on_text_style_picked(self, index: int):
+        """Type picked by hand for the selected box(es): tag them (an LLM
+        classification won't change it again) and apply the type's style."""
+        kind = self.main.text_style_combo.itemData(index) or ""
+        items = self._selected_text_items()
+        if not items:
+            return
+        for item in items:
+            blk = self._find_text_block_for_item(item)
+            if blk is not None:
+                blk.text_style = kind
+                blk.text_style_manual = True
+        style = (getattr(self.main, "text_styles", {}) or {}).get(kind)
+        if style:
+            self._apply_format_to_items(items, "apply_text_style", lambda it: apply_style_to_item(it, style))
+        self.main.mark_project_dirty()
+
+    def save_text_style_from_box(self):
+        """Saves the selected box's formatting as its type's style, and
+        restyles the other boxes of that type on this page."""
+        item = self.main.curr_tblock_item
+        kind = self.main.text_style_combo.currentData() or ""
+        if item is None or not kind:
+            MMessage.info(
+                text=self.main.tr("Select a text box and pick its type first."),
+                parent=self.main, duration=5,
+            )
+            return
+        blk = self._find_text_block_for_item(item)
+        if blk is not None:
+            blk.text_style = kind
+            blk.text_style_manual = True
+        style = style_from_item(item)
+        self.main.text_styles = dict(getattr(self.main, "text_styles", {}) or {})
+        self.main.text_styles[kind] = style
+        save_default_styles(self.main.text_styles)
+        self.refresh_text_style_labels()
+
+        others = []
+        for other in self.main.image_viewer.text_items:
+            if other is item:
+                continue
+            other_blk = self._find_text_block_for_item(other)
+            if other_blk is not None and block_kind(other_blk) == kind:
+                others.append(other)
+        if others:
+            self._apply_format_to_items(others, "apply_text_style", lambda it: apply_style_to_item(it, style))
+        self.main.mark_project_dirty()
+        MMessage.success(
+            text=self.main.tr("{0} style saved; applied to {1} other box(es) on this page.").format(
+                self.main.tr(kind_label(kind)), len(others)),
+            parent=self.main, duration=4,
+        )
+
     _FORMAT_BUTTONS = {"bold": "bold_button", "italic": "italic_button", "underline": "underline_button"}
 
     def _editing_selection_item(self) -> TextBlockItem | None:
@@ -744,6 +832,11 @@ class TextController:
             self.main.italic_button.setChecked(text_item.italic)
             self.main.underline_button.setChecked(text_item.underline)
 
+            blk = self._find_text_block_for_item(text_item)
+            kind = block_kind(blk) if blk is not None else ""
+            combo = self.main.text_style_combo
+            combo.setCurrentIndex(max(0, combo.findData(kind)))
+
             alignment_to_button = {
                 QtCore.Qt.AlignmentFlag.AlignLeft: 0,
                 QtCore.Qt.AlignmentFlag.AlignCenter: 1,
@@ -883,6 +976,8 @@ class TextController:
                 else None
             )
 
+            styles = dict(getattr(self.main, "text_styles", {}) or {})
+
             def render_selected_pages() -> set[str]:
                 updated_paths: set[str] = set()
                 target_lang_fallback = self.main.t_combo.currentText()
@@ -924,17 +1019,27 @@ class TextController:
                         live_wrap = not (vertical or no_space)
                         if live_wrap:
                             translation = hyphenate_text(translation, trg_lng_cd)
+                        style = style_for_block(styles, blk) or {}
+                        s_font = style.get("font_family") or font_family
+                        s_line_spacing = float(style.get("line_spacing") or line_spacing)
+                        s_outline_width = float(style.get("outline_width") or outline_width)
+                        s_bold = bool(style.get("bold", bold))
+                        s_italic = bool(style.get("italic", italic))
+                        s_underline = bool(style.get("underline", underline))
+                        s_alignment = style_alignment(style) if style else alignment
+                        s_outline_color = style_outline_color(style) if style else outline_color
+                        s_color = QColor(style["text_color"]) if style.get("text_color") else setting_font_color
                         wrapped, font_size, rendered_width, rendered_height = pyside_word_wrap(
                             translation,
-                            font_family,
+                            s_font,
                             block_width,
                             block_height,
-                            line_spacing,
-                            outline_width,
-                            bold,
-                            italic,
-                            underline,
-                            alignment,
+                            s_line_spacing,
+                            s_outline_width,
+                            s_bold,
+                            s_italic,
+                            s_underline,
+                            s_alignment,
                             direction,
                             max_font_size,
                             min_font_size,
@@ -948,19 +1053,19 @@ class TextController:
                             wrapped = translation
                             rendered_width = block_width
 
-                        font_color = get_smart_text_color(blk.font_color, setting_font_color)
+                        font_color = get_smart_text_color(blk.font_color, s_color)
                         text_props = TextItemProperties(
                             text=wrapped,
-                            font_family=font_family,
+                            font_family=s_font,
                             font_size=font_size,
                             text_color=font_color,
-                            alignment=alignment,
-                            line_spacing=line_spacing,
-                            outline_color=outline_color,
-                            outline_width=outline_width,
-                            bold=bold,
-                            italic=italic,
-                            underline=underline,
+                            alignment=s_alignment,
+                            line_spacing=s_line_spacing,
+                            outline_color=s_outline_color,
+                            outline_width=s_outline_width,
+                            bold=s_bold,
+                            italic=s_italic,
+                            underline=s_underline,
                             direction=direction,
                             position=(x1, y1),
                             rotation=blk.angle,
@@ -1088,7 +1193,8 @@ class TextController:
                 alignment, 
                 direction, 
                 max_font_size,
-                min_font_size
+                min_font_size,
+                styles=dict(getattr(self.main, "text_styles", {}) or {}),
             )
 
     def on_render_complete(self, rendered_image: np.ndarray):

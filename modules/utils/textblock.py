@@ -58,6 +58,12 @@ class TextBlock(object):
         self.font_color = font_color
         self.direction = direction
 
+        # Box type for text styles (modules/utils/text_styles.py): "" or one
+        # of STYLE_KINDS; text_style_manual marks a type picked by hand, which
+        # an LLM classification won't overwrite.
+        self.text_style = ""
+        self.text_style_manual = False
+
     @property
     def xywh(self):
         x1, y1, x2, y2 = self.xyxy
@@ -108,6 +114,8 @@ class TextBlock(object):
         new_block.max_font_size = self.max_font_size
         new_block.font_color = self.font_color
         new_block.direction = self.direction
+        new_block.text_style = getattr(self, "text_style", "")
+        new_block.text_style_manual = getattr(self, "text_style_manual", False)
         
         return new_block
 

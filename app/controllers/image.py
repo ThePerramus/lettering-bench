@@ -13,6 +13,7 @@ from app.ui.commands.inpaint import PatchInsertCommand
 from app.ui.commands.inpaint import PatchEraseCommand
 from app.ui.commands.inpaint import PatchCommandBase
 from app.ui.commands.base import _load_patch_image_rgba
+from modules.utils.text_styles import load_default_styles
 from app.ui.commands.box import AddTextItemCommand
 from app.ui.list_view_image_loader import ListViewImageLoader
 from app.thread_worker import GenericWorker
@@ -336,6 +337,8 @@ class ImageStateController:
         self.main.reference_excluded_pages.clear()
         self.main.reference_page_modes = {}
         self.main.reference_default_mode = "reveal"
+        self.main.text_styles = load_default_styles()
+        self.main.text_ctrl.refresh_text_style_labels()
         self.main.image_viewer.reference_manager.cancel()
         self.main._sync_reference_alignment_buttons()
         self.main._update_reference_offset_label()

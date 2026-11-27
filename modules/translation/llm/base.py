@@ -7,6 +7,7 @@ import imkit as imk
 from ..base import LLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import get_raw_text, set_texts_from_json
+from ...utils.text_styles import CLASSIFY_INSTRUCTION, set_block_kinds_from_json
 
 
 class BaseLLMTranslation(LLMTranslation):
@@ -53,11 +54,14 @@ class BaseLLMTranslation(LLMTranslation):
             List of updated TextBlock objects with translations
         """
         entire_raw_text = get_raw_text(blk_list)
-        system_prompt = self.get_system_prompt(self.source_lang, self.target_lang)
+        # The model sees the page anyway: let it also say what kind of text
+        # each box is (dialogue, caption, shout...), for the text styles.
+        system_prompt = self.get_system_prompt(self.source_lang, self.target_lang) + CLASSIFY_INSTRUCTION
         user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{entire_raw_text}"
-        
+
         entire_translated_text = self._perform_translation(user_prompt, system_prompt, image)
         set_texts_from_json(blk_list, entire_translated_text)
+        set_block_kinds_from_json(blk_list, entire_translated_text)
             
         return blk_list
     

@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-74 commits, 61 files touched, roughly +5,180/−400 lines relative to `v2.8.9`.
+75 commits, 63 files touched, roughly +5,520/−420 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -70,6 +70,15 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 ## Lettering & text rendering
 
+- **Text styles by box type** — the AI translator (GPT, Claude, Gemini, Custom) also classifies
+  each box, in the same request, as Dialogue, Caption, Shout, Whisper / Thought, Sound Effect or
+  Sign; the re-letter read/correct does too. The Text panel's new *Type* row shows and changes a
+  box's type (a type picked by hand isn't overwritten by later classifications). *Save Style*
+  stores the selected box's formatting (font, bold/italic/underline, alignment, color, outline,
+  line spacing) as its type's style and restyles that type's boxes on the page; Render then
+  letters every box with its type's style, fitting the size with that font. Types without a
+  style use the panel's settings. Styles are saved with the project, and the last ones saved
+  are the starting point for new projects.
 - **Formatting individual words** — select words inside a box being edited (double-click to edit)
   and Bold/Italic/Underline (or Ctrl+B/I/U), font, size and color apply to just those words. The
   buttons now follow the selection: they used to keep whatever was applied last, so a click meant

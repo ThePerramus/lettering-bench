@@ -14,6 +14,7 @@ from modules.detection.utils.geometry import shrink_bbox
 from app.ui.canvas.text.vertical_layout import VerticalTextDocumentLayout
 from modules.utils.language_utils import get_language_code, is_no_space_lang, is_vertical_language_code
 from modules.utils.hyphenation import hyphenate_text
+from modules.utils.text_styles import style_for_block, style_alignment
 
 from dataclasses import dataclass
 
@@ -431,8 +432,9 @@ def manual_wrap(
     underline: bool, 
     alignment: Qt.AlignmentFlag, 
     direction: Qt.LayoutDirection, 
-    init_font_size: int = 40, 
-    min_font_size: int = 10
+    init_font_size: int = 40,
+    min_font_size: int = 10,
+    styles: dict | None = None,
 ):
     
     target_lang = main_page.lang_mapping.get(main_page.t_combo.currentText(), None)
@@ -458,17 +460,19 @@ def manual_wrap(
         if not (vertical or no_space):
             source_text = hyphenate_text(translation, trg_lng_cd)
 
+        # The box type's style, if one is saved: its font decides the fit.
+        style = style_for_block(styles, blk) or {}
         wrapped, font_size = pyside_word_wrap(
             source_text,
-            font_family,
+            style.get("font_family") or font_family,
             width,
             height,
-            line_spacing,
-            outline_width,
-            bold,
-            italic,
-            underline,
-            alignment,
+            float(style.get("line_spacing") or line_spacing),
+            float(style.get("outline_width") or outline_width) if style.get("outline", True) else outline_width,
+            style.get("bold", bold),
+            style.get("italic", italic),
+            style.get("underline", underline),
+            style_alignment(style) if style else alignment,
             direction,
             init_font_size,
             min_font_size,

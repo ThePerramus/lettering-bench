@@ -36,6 +36,7 @@ from app.controllers.manual_workflow import ManualWorkflowController
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 from modules.utils.http_retry import TransientAPIError
 from modules.utils import progress
+from modules.utils.text_styles import load_default_styles
 
 
 # Ensure any pre-declared mandatory models
@@ -116,6 +117,9 @@ class ComicTranslate(ComicTranslateUI):
         # last mode picked.
         self.reference_page_modes = {}
         self.reference_default_mode = "reveal"
+        # One style per box type (modules/utils/text_styles.py), per project;
+        # new projects start from the last styles saved.
+        self.text_styles = load_default_styles()
         self.max_images_in_memory = 5
         self.loaded_images = []
 
@@ -273,6 +277,8 @@ class ComicTranslate(ComicTranslateUI):
         self.alignment_tool_group.get_button_group().buttons()[2].clicked.connect(self.text_ctrl.right_align)
         self.alignment_tool_group.get_button_group().buttons()[3].clicked.connect(self.text_ctrl.justify_align)
         self.bold_button.clicked.connect(self.text_ctrl.bold)
+        self.text_style_combo.activated.connect(self.text_ctrl.on_text_style_picked)
+        self.save_text_style_button.clicked.connect(self.text_ctrl.save_text_style_from_box)
         self.italic_button.clicked.connect(self.text_ctrl.italic)
         self.underline_button.clicked.connect(self.text_ctrl.underline)
         self.outline_font_color_button.clicked.connect(self.text_ctrl.on_outline_color_change)

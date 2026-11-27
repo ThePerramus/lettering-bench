@@ -23,6 +23,7 @@ from modules.utils.hyphenation import hyphenate_text
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
 from app.ui.messages import Messages
 from modules.utils.progress import current_task, TaskCancelled
+from modules.utils.text_styles import CLASSIFY_INSTRUCTION, set_block_kinds_from_json
 
 logger = logging.getLogger(__name__)
 
@@ -343,9 +344,12 @@ class ManualWorkflowController:
         user_prompt = f"{extra_context}\n{json.dumps(blocks, ensure_ascii=False, indent=2)}"
         engine = translator.engine
         response = engine._perform_translation(
-            user_prompt, self._CORRECT_SYSTEM_PROMPT.format(lang=translator.target_lang_en), image
+            user_prompt,
+            self._CORRECT_SYSTEM_PROMPT.format(lang=translator.target_lang_en) + CLASSIFY_INSTRUCTION,
+            image,
         )
         set_texts_from_json(targets, response)
+        set_block_kinds_from_json(targets, response)
         for blk in targets:
             if isinstance(blk.translation, dict):
                 # The model echoed the input's shape instead of a plain string.

@@ -297,9 +297,24 @@ class WorkspaceMixin:
         outline_settings_layout.addWidget(self.outline_width_dropdown)
         outline_settings_layout.addStretch()
 
+        # Box type + its saved style (modules/utils/text_styles.py).
+        text_style_layout = QtWidgets.QHBoxLayout()
+        self.text_style_combo = MComboBox().small()
+        self.text_style_combo.setToolTip(self.tr(
+            "Box Type: set by the AI when translating, or pick one. Render letters each box "
+            "with its type's saved style (types without one use the settings above)."))
+        self.save_text_style_button = MPushButton(self.tr("Save Style")).small()
+        self.save_text_style_button.setToolTip(self.tr(
+            "Save the selected box's formatting as the style for its type, and apply it to the "
+            "other boxes of that type on this page"))
+        text_style_layout.addWidget(MLabel(self.tr("Type:")))
+        text_style_layout.addWidget(self.text_style_combo, 1)
+        text_style_layout.addWidget(self.save_text_style_button)
+
         rendering_divider_top = MDivider()
         rendering_divider_bottom = MDivider()
         text_render_layout.addWidget(rendering_divider_top)
+        text_render_layout.addLayout(text_style_layout)
         text_render_layout.addLayout(font_settings_layout)
         text_render_layout.addLayout(main_text_settings_layout)
         text_render_layout.addLayout(outline_settings_layout)

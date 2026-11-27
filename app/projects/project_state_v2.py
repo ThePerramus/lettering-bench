@@ -413,6 +413,7 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         "reference_excluded_pages": list(comic_translate.reference_excluded_pages),
         "reference_page_modes": dict(comic_translate.reference_page_modes),
         "reference_default_mode": comic_translate.reference_default_mode,
+        "text_styles": dict(getattr(comic_translate, "text_styles", {}) or {}),
         "reference_book_path": comic_translate.reference_book_path,
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
@@ -674,6 +675,14 @@ def _materialize_from_manifest_and_pages(
         for p, mode in (manifest.get("reference_page_modes") or {}).items()
     }
     comic_translate.reference_default_mode = manifest.get("reference_default_mode") or "reveal"
+    # Projects saved before text styles existed start from the saved defaults.
+    if manifest.get("text_styles") is not None:
+        comic_translate.text_styles = dict(manifest.get("text_styles") or {})
+    else:
+        from modules.utils.text_styles import load_default_styles
+        comic_translate.text_styles = load_default_styles()
+    if hasattr(comic_translate, "text_ctrl"):
+        comic_translate.text_ctrl.refresh_text_style_labels()
     # Not remapped through original_to_temp: this points at the user's own
     # reference book file (e.g. a cbz kept somewhere on disk), never at a
     # page-image path that a project reload would relocate.
