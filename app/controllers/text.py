@@ -25,7 +25,8 @@ from modules.utils.image_utils import get_smart_text_color
 from modules.utils.common_utils import is_close
 from modules.utils.translator_utils import format_translations, is_renderable_translation
 from modules.utils.hyphenation import hyphenate_text
-from modules.utils.text_styles import (STYLE_KINDS, apply_style_to_item, block_kind, kind_label, save_default_styles, style_alignment, style_for_block, style_from_item, style_outline_color)
+from modules.utils.text_styles import (STYLE_KINDS, apply_style_to_item, block_kind, kind_label, save_default_styles, style_alignment, style_for_block, style_from_item, style_outline_color,
+    apply_emphasis)
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,9 @@ class TextController:
         # (CJK) text still arrives pre-wrapped and uses its own layout.
         if not vertical and not is_no_space_lang(trg_lng_cd):
             text_item.setTextWidth(blk.xywh[2])
+
+        # Words the AI marked as emphasized in the original go in bold.
+        apply_emphasis(text_item, getattr(blk, "emphasis", None))
 
         # Update or append the block in the main controller's blk_list
         existing_idx = next(

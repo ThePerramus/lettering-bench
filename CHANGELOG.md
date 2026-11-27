@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-75 commits, 63 files touched, roughly +5,520/−420 lines relative to `v2.8.9`.
+76 commits, 63 files touched, roughly +5,610/−420 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -70,6 +70,11 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 ## Lettering & text rendering
 
+- **Emphasis carried over** — the AI translator marks the words of its translation that carry
+  visibly emphasized lettering in the original (bold/heavier than the rest of the balloon), and
+  Render puts them in bold; the re-letter read/correct does the same for words printed in bold.
+  The markers never reach the translation text: the words are kept apart and matched as whole
+  words, so they survive edits to the translation. (Multi-page Render doesn't apply them yet.)
 - **Text styles by box type** — the AI translator (GPT, Claude, Gemini, Custom) also classifies
   each box, in the same request, as Dialogue, Caption, Shout, Whisper / Thought, Sound Effect or
   Sign; the re-letter read/correct does too. The Text panel's new *Type* row shows and changes a

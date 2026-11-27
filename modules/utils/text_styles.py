@@ -14,6 +14,7 @@ projects, in QSettings.
 from __future__ import annotations
 
 import json
+import re
 
 from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QColor
@@ -47,7 +48,65 @@ CLASSIFY_INSTRUCTION = (
     + ". Do not put anything else under \"_types\"."
 )
 
+# Emphasis: the LLM marks words that are visibly emphasized in the original
+# lettering with **...**; the markers are taken out of the text right away
+# (TextBlock.emphasis keeps the words) and Render puts those words in bold.
+EMPHASIS_INSTRUCTION = (
+    "\nIf some words in a block's original lettering are visibly emphasized in the image (bold "
+    "or heavier lettering than the rest of that balloon), wrap the words of your translation "
+    "that carry that emphasis in double asterisks, like **this**. Only for emphasis you can "
+    "see in the image - never add it otherwise."
+)
+EMPHASIS_INSTRUCTION_PRINTED = (
+    "\nIf some words are printed in bold (heavier lettering than the rest of that balloon), "
+    "wrap them in double asterisks, like **this**. Only for bold you can see in the image."
+)
+_EMPHASIS_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
 _SETTINGS_KEY = "text_styles/styles"
+
+
+def extract_emphasis(blk_list) -> int:
+    """Takes the **...** markers out of freshly set translations and keeps
+    the marked words in blk.emphasis. Returns how many blocks had some."""
+    marked = 0
+    for blk in blk_list:
+        text = getattr(blk, "translation", None)
+        if not isinstance(text, str):
+            continue
+        words = [w.strip() for w in _EMPHASIS_RE.findall(text) if w.strip()]
+        if "**" in text:
+            text = _EMPHASIS_RE.sub(r"\1", text).replace("**", "")
+            blk.translation = text
+        blk.emphasis = words
+        if words:
+            marked += 1
+    return marked
+
+
+def apply_emphasis(item, words) -> int:
+    """Puts each emphasized word/phrase in bold inside a rendered text item
+    (whole words, any case, soft hyphens allowed between letters). Returns
+    how many places were bolded."""
+    from PySide6.QtGui import QFont, QTextCharFormat, QTextCursor
+
+    if not words:
+        return 0
+    doc = item.document()
+    plain = doc.toPlainText()
+    fmt = QTextCharFormat()
+    fmt.setFontWeight(QFont.Weight.Bold)
+    count = 0
+    for word in words:
+        body = "\u00ad*".join(re.escape(ch) for ch in word)
+        pattern = re.compile(rf"(?<!\w){body}(?!\w)", re.IGNORECASE)
+        for m in pattern.finditer(plain):
+            cursor = QTextCursor(doc)
+            cursor.setPosition(m.start())
+            cursor.setPosition(m.end(), QTextCursor.MoveMode.KeepAnchor)
+            cursor.mergeCharFormat(fmt)
+            count += 1
+    return count
 
 
 def normalize_kind(value) -> str:

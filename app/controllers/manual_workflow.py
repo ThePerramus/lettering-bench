@@ -23,7 +23,10 @@ from modules.utils.hyphenation import hyphenate_text
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
 from app.ui.messages import Messages
 from modules.utils.progress import current_task, TaskCancelled
-from modules.utils.text_styles import CLASSIFY_INSTRUCTION, set_block_kinds_from_json
+from modules.utils.text_styles import (
+    CLASSIFY_INSTRUCTION, EMPHASIS_INSTRUCTION_PRINTED, apply_emphasis, extract_emphasis,
+    set_block_kinds_from_json,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +348,8 @@ class ManualWorkflowController:
         engine = translator.engine
         response = engine._perform_translation(
             user_prompt,
-            self._CORRECT_SYSTEM_PROMPT.format(lang=translator.target_lang_en) + CLASSIFY_INSTRUCTION,
+            self._CORRECT_SYSTEM_PROMPT.format(lang=translator.target_lang_en)
+            + CLASSIFY_INSTRUCTION + EMPHASIS_INSTRUCTION_PRINTED,
             image,
         )
         set_texts_from_json(targets, response)
@@ -354,6 +358,8 @@ class ManualWorkflowController:
             if isinstance(blk.translation, dict):
                 # The model echoed the input's shape instead of a plain string.
                 blk.translation = next((v for v in blk.translation.values() if isinstance(v, str)), "")
+        extract_emphasis(targets)
+        for blk in targets:
             blk.translation = self._flow_reference_text(blk.translation)
         logger.info(
             "Re-letter: LLM %s %d of %d boxes from the reference page",
@@ -757,6 +763,7 @@ class ManualWorkflowController:
             text: str,
             font_size: int,
             width: float | None,
+            emphasis: list | None = None,
         ) -> None:
             text_item.set_plain_text(text)
             text_item.set_font_size(font_size)
@@ -764,6 +771,7 @@ class ManualWorkflowController:
                 # Same as a fresh Render (see TextController.on_blk_rendered):
                 # live-wrap to the bubble width instead of baked line breaks.
                 text_item.setTextWidth(width)
+            apply_emphasis(text_item, emphasis)
 
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
@@ -824,8 +832,9 @@ class ManualWorkflowController:
 
                 self.main.run_threaded(
                     pyside_word_wrap,
-                    lambda wrap_res, ti=text_item, text=source_text, live=live_wrap, w=blk.xywh[2]: set_new_text(
-                        ti, text if live else wrap_res[0], wrap_res[1], w if live else None
+                    lambda wrap_res, ti=text_item, text=source_text, live=live_wrap, w=blk.xywh[2],
+                           em=list(getattr(blk, "emphasis", []) or []): set_new_text(
+                        ti, text if live else wrap_res[0], wrap_res[1], w if live else None, em
                     ),
                     self.main.default_error_handler,
                     None,

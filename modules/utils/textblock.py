@@ -63,6 +63,8 @@ class TextBlock(object):
         # an LLM classification won't overwrite.
         self.text_style = ""
         self.text_style_manual = False
+        # Words of the translation to render in bold (see text_styles.extract_emphasis).
+        self.emphasis = []
 
     @property
     def xywh(self):
@@ -116,6 +118,7 @@ class TextBlock(object):
         new_block.direction = self.direction
         new_block.text_style = getattr(self, "text_style", "")
         new_block.text_style_manual = getattr(self, "text_style_manual", False)
+        new_block.emphasis = list(getattr(self, "emphasis", []) or [])
         
         return new_block
 
