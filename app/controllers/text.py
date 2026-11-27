@@ -78,6 +78,10 @@ class TextController:
             except (TypeError, RuntimeError):
                 pass
             try:
+                text_item.format_shortcut.disconnect(self.toggle_format)
+            except (TypeError, RuntimeError):
+                pass
+            try:
                 text_item.change_undo.disconnect(self.main.rect_item_ctrl.rect_change_undo)
             except (TypeError, RuntimeError):
                 pass
@@ -91,6 +95,7 @@ class TextController:
         text_item.item_deselected.connect(self.on_text_item_deselected)
         text_item.text_changed.connect(text_item._ct_text_changed_slot)
         text_item.text_highlighted.connect(self.set_values_from_highlight)
+        text_item.format_shortcut.connect(self.toggle_format)
         text_item.change_undo.connect(self.main.rect_item_ctrl.rect_change_undo)
         self._last_item_text[text_item] = text_item.toPlainText()
         self._last_item_html[text_item] = text_item.document().toHtml()
@@ -235,6 +240,14 @@ class TextController:
         if not items:
             return
 
+        # Formatting part of a box: its selection must survive the command's
+        # redo(), which re-sets the item's HTML and would drop it.
+        kept_selections = {}
+        for item in items:
+            cursor = item.textCursor()
+            if item.editing_mode and cursor.hasSelection():
+                kept_selections[item] = (cursor.anchor(), cursor.position())
+
         commands = []
         for item in items:
             command = TextFormatCommand(self.main.image_viewer, item)
@@ -254,6 +267,13 @@ class TextController:
         finally:
             if len(commands) > 1:
                 stack.endMacro()
+
+        for item, (anchor, position) in kept_selections.items():
+            cursor = item.textCursor()
+            length = item.document().characterCount() - 1
+            cursor.setPosition(min(anchor, length))
+            cursor.setPosition(min(position, length), QTextCursor.MoveMode.KeepAnchor)
+            item.setTextCursor(cursor)
 
         if self.main.curr_tblock_item in items:
             self.set_values_for_blk_item(self.main.curr_tblock_item)
@@ -569,29 +589,54 @@ class TextController:
                 lambda item: item.set_alignment(QtCore.Qt.AlignmentFlag.AlignJustify),
             )
 
-    def bold(self):
-        if self._selected_text_items():
-            state = self.main.bold_button.isChecked()
-            self._apply_format_to_selected(
-                "change_text_bold",
-                lambda item: item.set_bold(state),
-            )
+    _FORMAT_BUTTONS = {"bold": "bold_button", "italic": "italic_button", "underline": "underline_button"}
 
-    def italic(self):
-        if self._selected_text_items():
-            state = self.main.italic_button.isChecked()
-            self._apply_format_to_selected(
-                "change_text_italic",
-                lambda item: item.set_italic(state),
-            )
+    def _editing_selection_item(self) -> TextBlockItem | None:
+        """The box being edited, if it has words selected in it."""
+        item = self.main.curr_tblock_item
+        if item is not None and item.editing_mode and item.textCursor().hasSelection():
+            return item
+        return None
 
-    def underline(self):
-        if self._selected_text_items():
-            state = self.main.underline_button.isChecked()
-            self._apply_format_to_selected(
-                "change_text_underline",
-                lambda item: item.set_underline(state),
-            )
+    @staticmethod
+    def _selection_has_format(item: TextBlockItem, attribute: str) -> bool:
+        return bool(item.get_selected_text_properties(item.textCursor()).get(attribute))
+
+    def toggle_format(self, attribute: str, from_button: bool = False):
+        """Bold/italic/underline from the toolbar button or Ctrl+B/I/U.
+
+        With words selected inside the box being edited, the new state comes
+        from those words (bold unless they're all bold already), not from the
+        button's own checked state - that one may still show whatever was
+        applied last, which used to turn a click meant to bolden a word into
+        un-bolding it. Without a selection it applies to the whole box(es)."""
+        button = getattr(self.main, self._FORMAT_BUTTONS[attribute])
+        item = self._editing_selection_item()
+        if item is not None:
+            state = not self._selection_has_format(item, attribute)
+        elif from_button:
+            state = button.isChecked()  # the click already toggled it
+        else:
+            current = self.main.curr_tblock_item
+            state = not bool(getattr(current, attribute, False)) if current else not button.isChecked()
+        with QtCore.QSignalBlocker(button):
+            button.setChecked(state)
+        if not self._selected_text_items():
+            return
+        setter = {"bold": "set_bold", "italic": "set_italic", "underline": "set_underline"}[attribute]
+        self._apply_format_to_selected(
+            f"change_text_{attribute}",
+            lambda it: getattr(it, setter)(state),
+        )
+
+    def bold(self, *_):
+        self.toggle_format("bold", from_button=True)
+
+    def italic(self, *_):
+        self.toggle_format("italic", from_button=True)
+
+    def underline(self, *_):
+        self.toggle_format("underline", from_button=True)
 
     def on_outline_color_change(self):
         outline_color = self.main.get_color()

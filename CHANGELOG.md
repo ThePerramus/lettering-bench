@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-73 commits, 60 files touched, roughly +5,080/−380 lines relative to `v2.8.9`.
+74 commits, 61 files touched, roughly +5,180/−400 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -70,6 +70,11 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 ## Lettering & text rendering
 
+- **Formatting individual words** — select words inside a box being edited (double-click to edit)
+  and Bold/Italic/Underline (or Ctrl+B/I/U), font, size and color apply to just those words. The
+  buttons now follow the selection: they used to keep whatever was applied last, so a click meant
+  to bolden a word un-bolded it. The selection survives formatting, so several formats can be
+  stacked, and changing the whole box's font no longer wipes per-word bold/italic.
 - **Format several boxes at once** — alignment, bold/italic/underline, outline and line spacing
   apply to every selected text box, not just the current one.
 - **Justify alignment** — a fourth option beside left/center/right; the paragraph's final line

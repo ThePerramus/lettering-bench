@@ -42,6 +42,8 @@ class TextBlockItem(QGraphicsTextItem):
     item_selected = Signal(object)
     item_deselected = Signal()
     text_highlighted = Signal(dict)
+    # Ctrl+B / Ctrl+I / Ctrl+U while editing: "bold", "italic" or "underline".
+    format_shortcut = Signal(str)
     change_undo = Signal(TextBlockState, TextBlockState)
     
     def __init__(self, 
@@ -266,7 +268,9 @@ class TextBlockItem(QGraphicsTextItem):
 
         format_operations = {
             'color': lambda cf, v: cf.setForeground(v),
-            'font': lambda cf, v: cf.setFont(v),
+            # Family and size only: setFont() would also reset weight/italic/
+            # underline, wiping words made bold or italic inside the box.
+            'font': lambda cf, v: (cf.setFontFamilies([v.family()]), cf.setFontPointSize(v.pointSizeF())),
             'size': lambda cf, v: cf.setFontPointSize(v),
             'bold': lambda cf, v: cf.setFontWeight(QFont.Bold if v else QFont.Normal),
             'italic': lambda cf, v: cf.setFontItalic(v),
@@ -302,9 +306,12 @@ class TextBlockItem(QGraphicsTextItem):
                 self.document().setDefaultFont(font)
             self.document().setDefaultTextOption(doc_format)
         
-        # Clear the selection by moving the cursor to the end of the document
-        cursor.clearSelection()
-        cursor.movePosition(QTextCursor.End)
+        # A formatted selection stays selected, so several formats can be
+        # applied to the same words in a row; otherwise park the cursor at
+        # the end as before.
+        if not has_selection:
+            cursor.clearSelection()
+            cursor.movePosition(QTextCursor.End)
 
         self.setTextCursor(cursor)
         self.update()
@@ -527,6 +534,17 @@ class TextBlockItem(QGraphicsTextItem):
 
     def keyPressEvent(self, event):
 
+        if self.editing_mode and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            shortcut = {
+                Qt.Key.Key_B: "bold",
+                Qt.Key.Key_I: "italic",
+                Qt.Key.Key_U: "underline",
+            }.get(event.key())
+            if shortcut:
+                self.format_shortcut.emit(shortcut)
+                event.accept()
+                return
+
         if self.editing_mode and self.vertical:
             key = event.key()
             modifiers = event.modifiers()
@@ -661,8 +679,25 @@ class TextBlockItem(QGraphicsTextItem):
             self._drag_selecting = False
             self._drag_select_anchor = None
             event.accept()
+            self.notify_selection_changed()
             return
         super().mouseReleaseEvent(event)
+        if self.editing_mode:
+            self.notify_selection_changed()
+
+    def keyReleaseEvent(self, event):
+        super().keyReleaseEvent(event)
+        if self.editing_mode:
+            self.notify_selection_changed()
+
+    def notify_selection_changed(self):
+        """Updates the toolbar (bold/italic/underline, font, size) to what's
+        selected, whenever the selection or caret moved."""
+        cursor = self.textCursor()
+        key = (cursor.anchor(), cursor.position())
+        if key != getattr(self, "_last_notified_selection", None):
+            self._last_notified_selection = key
+            self.on_selection_changed()
 
     def contextMenuEvent(self, event):
         super().contextMenuEvent(event)
@@ -833,9 +868,9 @@ class TextBlockItem(QGraphicsTextItem):
             return {
                 'font_family': self.font_family,
                 'font_size': self.font_size,
-                'bold': False,
-                'italic': False,
-                'underline': False,
+                'bold': bool(self.bold),
+                'italic': bool(self.italic),
+                'underline': bool(self.underline),
                 'text_color': self.text_color.name(),
                 'alignment': self.alignment,
                 'outline': self.outline,
