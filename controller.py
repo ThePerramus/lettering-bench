@@ -278,6 +278,7 @@ class ComicTranslate(ComicTranslateUI):
         self.alignment_tool_group.get_button_group().buttons()[3].clicked.connect(self.text_ctrl.justify_align)
         self.bold_button.clicked.connect(self.text_ctrl.bold)
         self.text_style_combo.activated.connect(self.text_ctrl.on_text_style_picked)
+        self.shape_checkbox.clicked.connect(self.text_ctrl.on_shape_toggled)
         self.save_text_style_button.clicked.connect(self.text_ctrl.save_text_style_from_box)
         self.italic_button.clicked.connect(self.text_ctrl.italic)
         self.underline_button.clicked.connect(self.text_ctrl.underline)

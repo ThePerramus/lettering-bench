@@ -32,6 +32,7 @@ class TextItemProperties:
     width: Optional[float] = None
     height: Optional[float] = None
     vertical: bool = False
+    shaped: bool = False
     
     # Advanced properties
     selection_outlines: list = field(default_factory=list)
@@ -100,7 +101,8 @@ class TextItemProperties:
         props.width = data.get('width')
         props.height = data.get('height')
         props.vertical = data.get('vertical', False)
-        
+        props.shaped = bool(data.get('shaped', False))
+
         # Advanced
         props.selection_outlines = data.get('selection_outlines', [])
         
@@ -138,7 +140,8 @@ class TextItemProperties:
         props.width = item.boundingRect().width()
         props.height = item.boundingRect().height()
         props.vertical = getattr(item, 'vertical', False)
-        
+        props.shaped = bool(getattr(item, 'shaped', False))
+
         # Advanced properties
         props.selection_outlines = getattr(item, 'selection_outlines', []).copy()
         
@@ -167,6 +170,7 @@ class TextItemProperties:
             'width': self.width,
             'height': self.height,
             'vertical': self.vertical,
+            'shaped': self.shaped,
             'selection_outlines': self.selection_outlines,
         }
 

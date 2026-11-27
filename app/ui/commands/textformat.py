@@ -32,6 +32,8 @@ class TextFormatCommand(QUndoCommand, RectCommandBase):
         if matching_item:
             matching_item.set_text(self.new_html, self.new_item_prp.width)
             matching_item.__dict__.update(self.new_dict)
+            if hasattr(matching_item, "sync_shape"):
+                matching_item.sync_shape()
             matching_item.update()
 
     def undo(self):
@@ -39,4 +41,6 @@ class TextFormatCommand(QUndoCommand, RectCommandBase):
         if matching_item:
             matching_item.set_text(self.old_html, self.old_item_prp.width)
             matching_item.__dict__.update(self.old_dict)
+            if hasattr(matching_item, "sync_shape"):
+                matching_item.sync_shape()
             matching_item.update()

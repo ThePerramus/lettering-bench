@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-76 commits, 63 files touched, roughly +5,610/−420 lines relative to `v2.8.9`.
+77 commits, 65 files touched, roughly +5,890/−420 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -70,6 +70,11 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
 
 ## Lettering & text rendering
 
+- **Oval (balloon-shaped) lines** — the Text panel's *Oval* option fits a box's lines to an oval,
+  short at the top and bottom and long in the middle as a letterer would, instead of a rectangle
+  of equal lines. The oval is as wide as the box and just tall enough for the text, follows the
+  box when it's resized, and falls back to the rectangle when the text can't fit an oval. Editing,
+  per-word formatting, outline, undo, saving and export all keep working with it.
 - **Emphasis carried over** — the AI translator marks the words of its translation that carry
   visibly emphasized lettering in the original (bold/heavier than the rest of the balloon), and
   Render puts them in bold; the re-letter read/correct does the same for words printed in bold.

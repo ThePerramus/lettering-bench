@@ -296,6 +296,11 @@ class WorkspaceMixin:
         outline_settings_layout.addWidget(self.outline_font_color_button)
         outline_settings_layout.addWidget(self.outline_width_dropdown)
         outline_settings_layout.addStretch()
+        self.shape_checkbox = MCheckBox(self.tr("Oval"))
+        self.shape_checkbox.setToolTip(self.tr(
+            "Fit the lines to an oval, like a balloon (short lines at the top and bottom), "
+            "instead of a rectangle"))
+        outline_settings_layout.addWidget(self.shape_checkbox)
 
         # Box type + its saved style (modules/utils/text_styles.py).
         text_style_layout = QtWidgets.QHBoxLayout()

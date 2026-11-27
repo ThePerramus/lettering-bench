@@ -47,6 +47,7 @@ class TextController:
             self.main.outline_width_dropdown,
             self.main.outline_checkbox,
             self.main.text_style_combo,
+            self.main.shape_checkbox,
         ]
         self.refresh_text_style_labels()
         self._text_change_timer = QtCore.QTimer(self.main)
@@ -644,6 +645,10 @@ class TextController:
             self._apply_format_to_items(items, "apply_text_style", lambda it: apply_style_to_item(it, style))
         self.main.mark_project_dirty()
 
+    def on_shape_toggled(self, checked: bool):
+        """Oval (balloon-shaped) lines on/off for the selected boxes."""
+        self._apply_format_to_selected("toggle_text_shape", lambda it: it.set_shaped(checked))
+
     def save_text_style_from_box(self):
         """Saves the selected box's formatting as its type's style, and
         restyles the other boxes of that type on this page."""
@@ -840,6 +845,7 @@ class TextController:
             kind = block_kind(blk) if blk is not None else ""
             combo = self.main.text_style_combo
             combo.setCurrentIndex(max(0, combo.findData(kind)))
+            self.main.shape_checkbox.setChecked(bool(getattr(text_item, "shaped", False)))
 
             alignment_to_button = {
                 QtCore.Qt.AlignmentFlag.AlignLeft: 0,

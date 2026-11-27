@@ -7,6 +7,7 @@ import math, copy
 from dataclasses import dataclass
 from enum import Enum
 from .text.vertical_layout import VerticalTextDocumentLayout
+from .text.shaped_layout import ShapedTextDocumentLayout
 
 
 @dataclass
@@ -76,6 +77,9 @@ class TextBlockItem(QGraphicsTextItem):
 
         self.layout = None
         self.vertical = False
+        # Lines fitted to an oval, like a balloon (ShapedTextDocumentLayout),
+        # instead of a rectangle. Horizontal text only.
+        self.shaped = False
 
         self.selected = False
         self.resizing = False
@@ -162,8 +166,34 @@ class TextBlockItem(QGraphicsTextItem):
             self.layout = None
             doc.setDocumentLayout(None)  # Qt will restore the default layout.
             self.setTextWidth(current_rect.width())
+            if self.shaped:
+                self.sync_shape()
         
         # After setting the new layout, update the item's state
+        self.setCenterTransform()
+        self.update()
+
+    def set_shaped(self, shaped: bool):
+        """Fit the lines to an oval (True) or the usual rectangle (False)."""
+        self.shaped = bool(shaped)
+        self.sync_shape()
+
+    def sync_shape(self):
+        """Installs or removes the oval layout to match self.shaped (also
+        after an undo restored the flag)."""
+        if self.vertical:
+            return
+        doc = self.document()
+        is_shaped = isinstance(doc.documentLayout(), ShapedTextDocumentLayout)
+        want = bool(getattr(self, "shaped", False))
+        if want == is_shaped:
+            return
+        width = doc.textWidth()
+        if width is None or width <= 0:
+            width = self.boundingRect().width()
+        self.prepareGeometryChange()
+        doc.setDocumentLayout(ShapedTextDocumentLayout(doc) if want else None)
+        self.setTextWidth(width)
         self.setCenterTransform()
         self.update()
 
@@ -464,6 +494,9 @@ class TextBlockItem(QGraphicsTextItem):
         doc.setDefaultTextOption(source.defaultTextOption())
         doc.setPageSize(source.pageSize())
         doc.setTextWidth(source.textWidth())
+        if getattr(self, "shaped", False) and not self.vertical:
+            doc.setDocumentLayout(ShapedTextDocumentLayout(doc))
+            doc.setTextWidth(source.textWidth())
 
         if self.vertical and self.layout:
             vertical_layout = VerticalTextDocumentLayout(
