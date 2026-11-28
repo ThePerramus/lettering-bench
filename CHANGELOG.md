@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-77 commits, 65 files touched, roughly +5,890/−420 lines relative to `v2.8.9`.
+78 commits, 65 files touched, roughly +6,000/−420 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -74,7 +74,16 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   short at the top and bottom and long in the middle as a letterer would, instead of a rectangle
   of equal lines. The oval is as wide as the box and just tall enough for the text, follows the
   box when it's resized, and falls back to the rectangle when the text can't fit an oval. Editing,
-  per-word formatting, outline, undo, saving and export all keep working with it.
+  per-word formatting, outline, undo, saving and export all keep working with it. (A crash that
+  could happen when drawing oval boxes, depending on memory cleanup timing, is fixed.)
+- **Boxes fitted and centered in their balloon** — Render letters Dialogue, Shout and Whisper
+  boxes in an oval and Captions, Signs, Sound Effects and untyped boxes in a rectangle (each
+  type's style can change that), and centers every box in its detected balloon (or in the
+  original text's box when there's none). The font size is never changed - the min/max size
+  settings rule as before: for an oval, the box width is picked so the oval has about the
+  balloon's proportions without being wider than it (8% inner margin). Text that doesn't fit
+  stays centered and overflows evenly. Re-translating a box refits and recenters it. Oval lines
+  break only between words or at syllable hyphens.
 - **Emphasis carried over** — the AI translator marks the words of its translation that carry
   visibly emphasized lettering in the original (bold/heavier than the rest of the balloon), and
   Render puts them in bold; the re-letter read/correct does the same for words printed in bold.

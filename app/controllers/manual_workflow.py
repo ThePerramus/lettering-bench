@@ -764,6 +764,7 @@ class ManualWorkflowController:
             font_size: int,
             width: float | None,
             emphasis: list | None = None,
+            blk: TextBlock | None = None,
         ) -> None:
             text_item.set_plain_text(text)
             text_item.set_font_size(font_size)
@@ -772,6 +773,9 @@ class ManualWorkflowController:
                 # live-wrap to the bubble width instead of baked line breaks.
                 text_item.setTextWidth(width)
             apply_emphasis(text_item, emphasis)
+            if blk is not None and width is not None:
+                # New text, new length: refit the oval / recenter in the balloon.
+                self.main.text_ctrl.place_in_balloon(text_item, blk, bool(getattr(text_item, "shaped", False)))
 
         text_items_to_process = self._get_visible_text_items()
         if not text_items_to_process:
@@ -833,8 +837,8 @@ class ManualWorkflowController:
                 self.main.run_threaded(
                     pyside_word_wrap,
                     lambda wrap_res, ti=text_item, text=source_text, live=live_wrap, w=blk.xywh[2],
-                           em=list(getattr(blk, "emphasis", []) or []): set_new_text(
-                        ti, text if live else wrap_res[0], wrap_res[1], w if live else None, em
+                           em=list(getattr(blk, "emphasis", []) or []), b=blk: set_new_text(
+                        ti, text if live else wrap_res[0], wrap_res[1], w if live else None, em, b
                     ),
                     self.main.default_error_handler,
                     None,

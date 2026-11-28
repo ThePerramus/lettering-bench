@@ -164,7 +164,22 @@ def style_from_item(item) -> dict:
         "outline_color": QColor(item.outline_color).name() if item.outline_color is not None else None,
         "outline_width": float(item.outline_width or 1.0),
         "line_spacing": float(item.line_spacing or 1.0),
+        "shaped": bool(getattr(item, "shaped", False)),
     }
+
+
+# Box types lettered in an oval by default (until their style says otherwise).
+OVAL_KINDS = {"dialogue", "shout", "whisper"}
+
+
+def shaped_for_block(styles: dict, blk) -> bool:
+    """Whether Render letters this box in an oval: its type's style decides
+    when it says so, otherwise balloons (dialogue, shout, whisper) are oval
+    and captions, signs, sound effects and untyped boxes rectangular."""
+    style = style_for_block(styles, blk)
+    if style and "shaped" in style:
+        return bool(style["shaped"])
+    return block_kind(blk) in OVAL_KINDS
 
 
 def style_alignment(style: dict):
@@ -192,6 +207,8 @@ def apply_style_to_item(item, style: dict):
     else:
         item.set_outline(None, None)
     item.set_line_spacing(float(style.get("line_spacing") or 1.0))
+    if "shaped" in style and hasattr(item, "set_shaped"):
+        item.set_shaped(bool(style["shaped"]))
 
 
 def style_for_block(styles: dict, blk) -> dict | None:

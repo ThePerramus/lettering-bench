@@ -26,7 +26,7 @@ from modules.utils.common_utils import is_close
 from modules.utils.translator_utils import format_translations, is_renderable_translation
 from modules.utils.hyphenation import hyphenate_text
 from modules.utils.text_styles import (STYLE_KINDS, apply_style_to_item, block_kind, kind_label, save_default_styles, style_alignment, style_for_block, style_from_item, style_outline_color,
-    apply_emphasis)
+    apply_emphasis, shaped_for_block)
 
 logger = logging.getLogger(__name__)
 
@@ -209,8 +209,75 @@ class TextController:
         else:
             self.main.blk_list.append(blk)
 
+        # Oval or rectangle by box type, centered in the balloon. Done before
+        # the command is pushed so undo/redo keep the final geometry.
+        if not vertical and not is_no_space_lang(trg_lng_cd):
+            self.place_in_balloon(
+                text_item, blk, shaped_for_block(getattr(self.main, "text_styles", {}), blk))
+
         command = AddTextItemCommand(self.main, text_item)
         self.main.push_command(command)
+
+    # Inset from the balloon's box edges: its outline and the empty
+    # corners of a round balloon.
+    BALLOON_INSET = 0.08
+
+    def _balloon_area(self, blk) -> tuple[float, float, float, float]:
+        """(x1, y1, x2, y2) the text should sit in: the detected balloon
+        minus a margin, or the text's own box when there's no balloon."""
+        tx1, ty1, tx2, ty2 = [float(v) for v in blk.xyxy]
+        bubble = getattr(blk, "bubble_xyxy", None)
+        if bubble is not None:
+            bx1, by1, bx2, by2 = [float(v) for v in bubble]
+            cx, cy = (tx1 + tx2) / 2, (ty1 + ty2) / 2
+            # Only a balloon that actually holds this text.
+            if bx2 - bx1 > 4 and by2 - by1 > 4 and bx1 <= cx <= bx2 and by1 <= cy <= by2:
+                dx, dy = (bx2 - bx1) * self.BALLOON_INSET, (by2 - by1) * self.BALLOON_INSET
+                return bx1 + dx, by1 + dy, bx2 - dx, by2 - dy
+        return tx1, ty1, tx2, ty2
+
+    def place_in_balloon(self, text_item: TextBlockItem, blk: TextBlock, shaped: bool):
+        """Letters the box as an oval or a rectangle and centers it in its
+        balloon. The font size isn't touched: for an oval, the box width is
+        chosen so the oval has about the balloon's proportions without
+        being wider than it. Text that doesn't fit stays centered and
+        overflows evenly."""
+        if blk is None or abs(float(getattr(blk, "angle", 0) or 0)) > 0.5:
+            return
+        x1, y1, x2, y2 = self._balloon_area(blk)
+        area_w, area_h = max(1.0, x2 - x1), max(1.0, y2 - y1)
+
+        text_item.set_shaped(shaped)
+        if shaped:
+            target_ratio = area_h / area_w
+            best = None  # (key, width)
+            step = 0.95
+            while step >= 0.35:
+                width = area_w * step
+                text_item.setTextWidth(width)
+                rect = text_item.boundingRect()
+                layout = text_item.document().documentLayout()
+                ok = bool(getattr(layout, "shaped_ok", True))
+                fits = rect.height() <= area_h + 0.5
+                # Prefer real ovals that fit, then the closest proportions.
+                key = (not ok, not fits, abs(rect.height() / max(1.0, rect.width()) - target_ratio))
+                if best is None or key < best[0]:
+                    best = (key, width)
+                step -= 0.04
+            text_item.setTextWidth(best[1])
+
+        rect = text_item.boundingRect()
+        cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+        new_x, new_y = cx - rect.width() / 2, cy - rect.height() / 2
+        text_item.setPos(new_x, new_y)
+        text_item.setCenterTransform()
+        # The block follows its text box: Render and selection match the two
+        # by position.
+        blk.xyxy = np.array(
+            [int(round(new_x)), int(round(new_y)),
+             int(round(new_x + rect.width())), int(round(new_y + rect.height()))],
+            dtype=np.asarray(blk.xyxy).dtype if hasattr(blk.xyxy, "dtype") else np.int32,
+        )
 
     def on_text_item_selected(self, text_item: TextBlockItem):
         self._commit_pending_text_command()

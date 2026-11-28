@@ -192,7 +192,11 @@ class TextBlockItem(QGraphicsTextItem):
         if width is None or width <= 0:
             width = self.boundingRect().width()
         self.prepareGeometryChange()
-        doc.setDocumentLayout(ShapedTextDocumentLayout(doc) if want else None)
+        # Keep a Python reference: PySide doesn't hand the layout's ownership
+        # to the document, so an unreferenced one gets freed while still in
+        # use (a crash on the next paint).
+        self._shaped_layout = ShapedTextDocumentLayout(doc) if want else None
+        doc.setDocumentLayout(self._shaped_layout)
         self.setTextWidth(width)
         self.setCenterTransform()
         self.update()
@@ -495,7 +499,9 @@ class TextBlockItem(QGraphicsTextItem):
         doc.setPageSize(source.pageSize())
         doc.setTextWidth(source.textWidth())
         if getattr(self, "shaped", False) and not self.vertical:
-            doc.setDocumentLayout(ShapedTextDocumentLayout(doc))
+            # Referenced from the clone itself so it lives as long as it.
+            doc._shaped_layout = ShapedTextDocumentLayout(doc)
+            doc.setDocumentLayout(doc._shaped_layout)
             doc.setTextWidth(source.textWidth())
 
         if self.vertical and self.layout:

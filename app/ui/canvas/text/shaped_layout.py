@@ -58,7 +58,9 @@ class ShapedTextDocumentLayout(QAbstractTextDocumentLayout):
         layout = block.layout()
         option = QTextOption(self.document().defaultTextOption())
         option.setAlignment(block.blockFormat().alignment())
-        option.setWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        # Words (and soft hyphens) only: a word that doesn't fit makes that
+        # oval fail instead of being chopped mid-word.
+        option.setWrapMode(QTextOption.WrapMode.WordWrap)
         layout.setTextOption(option)
         layout.setFont(self.document().defaultFont())
         return layout
