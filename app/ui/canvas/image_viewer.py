@@ -521,6 +521,7 @@ class ImageViewer(QGraphicsView):
         item.setScale(properties.scale)
 
         item.set_vertical(bool(properties.vertical))
+        item.shape_profile = getattr(properties, "shape_profile", None)
         item.set_shaped(bool(getattr(properties, "shaped", False)))
         item.set_color(properties.text_color)
             

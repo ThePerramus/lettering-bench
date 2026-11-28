@@ -5,7 +5,7 @@
 a workflow for pages that already have a translation to reuse instead of retranslating them, plus
 several general-purpose editing and lettering improvements built along the way.
 
-78 commits, 65 files touched, roughly +6,000/−420 lines relative to `v2.8.9`.
+79 commits, 66 files touched, roughly +6,200/−420 lines relative to `v2.8.9`.
 
 ## Reference-page reveal workflow
 
@@ -76,6 +76,13 @@ the LQ scan onto it, and reveals the LQ page's own pixels through the holes.
   box when it's resized, and falls back to the rectangle when the text can't fit an oval. Editing,
   per-word formatting, outline, undo, saving and export all keep working with it. (A crash that
   could happen when drawing oval boxes, depending on memory cleanup timing, is fixed.)
+- **Lines follow the balloon's real shape** — on Render, a balloon-shaped box takes the balloon's
+  actual outline (found with the same interior detection Clean uses, tail - bottom or side -
+  left out, 7% inner margin): every line gets the free width at its height and the text is
+  centered in the balloon's body. The shape is stored with the box in proportions, so it follows
+  resizing, and survives saving, reloading, export and undo; when no shape can be found it's the
+  oval as before. The Text panel option is now *Balloon Shape*. Words under five letters are no
+  longer hyphenated (trailing punctuation used to count, splitting "fi-ni.").
 - **Boxes fitted and centered in their balloon** — Render letters Dialogue, Shout and Whisper
   boxes in an oval and Captions, Signs, Sound Effects and untyped boxes in a rectangle (each
   type's style can change that), and centers every box in its detected balloon (or in the

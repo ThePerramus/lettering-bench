@@ -11,6 +11,7 @@ from PySide6.QtGui import QColor, QTextCursor
 
 from app.ui.commands.textformat import TextFormatCommand
 from app.ui.dayu_widgets.message import MMessage
+from modules.utils.balloon_shape import balloon_profile
 from app.ui.commands.box import AddTextItemCommand, ResizeBlocksCommand
 from app.ui.commands.text_edit import TextEditCommand
 from app.ui.canvas.text_item import TextBlockItem
@@ -236,6 +237,15 @@ class TextController:
                 return bx1 + dx, by1 + dy, bx2 - dx, by2 - dy
         return tx1, ty1, tx2, ty2
 
+    def _shape_page_image(self):
+        """The current page as shown (cleaned patches included), for finding
+        balloon shapes; fetched once per Render / re-translate."""
+        image = getattr(self, "_shape_image_cache", None)
+        if image is None:
+            image = self.main.image_viewer.get_image_array()
+            self._shape_image_cache = image
+        return image
+
     def place_in_balloon(self, text_item: TextBlockItem, blk: TextBlock, shaped: bool):
         """Letters the box as an oval or a rectangle and centers it in its
         balloon. The font size isn't touched: for an oval, the box width is
@@ -247,8 +257,21 @@ class TextController:
         x1, y1, x2, y2 = self._balloon_area(blk)
         area_w, area_h = max(1.0, x2 - x1), max(1.0, y2 - y1)
 
+        # The balloon's real shape, when it can be found: the lines follow it
+        # (and the box takes the free area it leaves) instead of an oval.
+        profile = None
+        if shaped and not self.main.webtoon_mode:
+            bubble = getattr(blk, "bubble_xyxy", None)
+            if bubble is not None and (x1, y1, x2, y2) != tuple(float(v) for v in blk.xyxy):
+                profile, free = balloon_profile(self._shape_page_image(), bubble, blk.xyxy)
+                if profile is not None:
+                    x1, y1, x2, y2 = free
+        text_item.shape_profile = profile
         text_item.set_shaped(shaped)
-        if shaped:
+        if shaped and profile is not None:
+            margin = text_item.document().documentMargin()
+            text_item.setTextWidth((x2 - x1) + 2 * margin)
+        elif shaped:
             target_ratio = area_h / area_w
             best = None  # (key, width)
             step = 0.95
@@ -1191,6 +1214,7 @@ class TextController:
             self.main.set_tool(None)
             if not font_selected(self.main):
                 return
+            self._shape_image_cache = None
             self.clear_text_edits()
             self.main.loading.setVisible(True)
             self.main.disable_hbutton_group()

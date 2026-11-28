@@ -80,6 +80,9 @@ class TextBlockItem(QGraphicsTextItem):
         # Lines fitted to an oval, like a balloon (ShapedTextDocumentLayout),
         # instead of a rectangle. Horizontal text only.
         self.shaped = False
+        # The balloon's real shape for those lines (balloon_shape.balloon_profile);
+        # None means a plain oval.
+        self.shape_profile = None
 
         self.selected = False
         self.resizing = False
@@ -186,6 +189,16 @@ class TextBlockItem(QGraphicsTextItem):
         doc = self.document()
         is_shaped = isinstance(doc.documentLayout(), ShapedTextDocumentLayout)
         want = bool(getattr(self, "shaped", False))
+        profile = getattr(self, "shape_profile", None)
+        if want and is_shaped:
+            layout = doc.documentLayout()
+            if layout.profile != profile:
+                self.prepareGeometryChange()
+                layout.profile = profile
+                layout.documentChanged(0, 0, 0)
+                self.setCenterTransform()
+                self.update()
+            return
         if want == is_shaped:
             return
         width = doc.textWidth()
@@ -196,6 +209,8 @@ class TextBlockItem(QGraphicsTextItem):
         # to the document, so an unreferenced one gets freed while still in
         # use (a crash on the next paint).
         self._shaped_layout = ShapedTextDocumentLayout(doc) if want else None
+        if self._shaped_layout is not None:
+            self._shaped_layout.profile = profile
         doc.setDocumentLayout(self._shaped_layout)
         self.setTextWidth(width)
         self.setCenterTransform()
@@ -501,6 +516,7 @@ class TextBlockItem(QGraphicsTextItem):
         if getattr(self, "shaped", False) and not self.vertical:
             # Referenced from the clone itself so it lives as long as it.
             doc._shaped_layout = ShapedTextDocumentLayout(doc)
+            doc._shaped_layout.profile = getattr(self, "shape_profile", None)
             doc.setDocumentLayout(doc._shaped_layout)
             doc.setTextWidth(source.textWidth())
 

@@ -80,7 +80,8 @@ def hyphenate_text(text: str, lang_code: str | None) -> str:
 
     def _hyphenate_word(match: re.Match) -> str:
         word = match.group(0)
-        if len(word) < _MIN_WORD_LEN:
+        # Letters only: punctuation glued to a short word ("fini.") doesn't count.
+        if sum(ch.isalpha() for ch in word) < _MIN_WORD_LEN:
             return word
         try:
             return dic.inserted(word, hyphen="­")

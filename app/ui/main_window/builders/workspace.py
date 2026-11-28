@@ -296,10 +296,10 @@ class WorkspaceMixin:
         outline_settings_layout.addWidget(self.outline_font_color_button)
         outline_settings_layout.addWidget(self.outline_width_dropdown)
         outline_settings_layout.addStretch()
-        self.shape_checkbox = MCheckBox(self.tr("Oval"))
+        self.shape_checkbox = MCheckBox(self.tr("Balloon Shape"))
         self.shape_checkbox.setToolTip(self.tr(
-            "Fit the lines to an oval, like a balloon (short lines at the top and bottom), "
-            "instead of a rectangle"))
+            "Fit the lines to the balloon's shape (found on Render; an oval when it can't be "
+            "found) instead of a rectangle"))
         outline_settings_layout.addWidget(self.shape_checkbox)
 
         # Box type + its saved style (modules/utils/text_styles.py).

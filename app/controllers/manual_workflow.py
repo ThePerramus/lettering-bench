@@ -781,6 +781,7 @@ class ManualWorkflowController:
         if not text_items_to_process:
             self.finish_ocr_translate(single_blk)
             return
+        self.main.text_ctrl._shape_image_cache = None
 
         rs = self.main.render_settings()
         upper = rs.upper_case

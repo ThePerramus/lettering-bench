@@ -35,6 +35,9 @@ class ShapedTextDocumentLayout(QAbstractTextDocumentLayout):
         self._size = QSizeF(0, 0)
         self._block_rects: dict[int, QRectF] = {}
         self.shaped_ok = False  # False when it fell back to a rectangle
+        # The balloon's real shape (modules/utils/balloon_shape.balloon_profile);
+        # None lays the text out in an oval.
+        self.profile = None
 
     # --- geometry --------------------------------------------------------
 
@@ -95,6 +98,41 @@ class ShapedTextDocumentLayout(QAbstractTextDocumentLayout):
             block = block.next()
         return y, fits
 
+    def _ellipse_chords(self, width: float, height: float):
+        half_h, half_w, cx = height / 2.0, width / 2.0, width / 2.0
+        min_chord = width * _MIN_CHORD_FRACTION
+
+        def chord(y0, y1):
+            # Narrowest chord of the ellipse across the line's band.
+            widths = []
+            for y in (y0, y1):
+                d = (y - half_h) / half_h
+                widths.append(2 * half_w * math.sqrt(max(0.0, 1 - d * d)))
+            w = max(min_chord, min(widths))
+            return cx - w / 2.0, w
+        return chord
+
+    def _profile_chords(self, width: float, height: float):
+        """Chords from the balloon's real shape (see modules/utils/balloon_shape),
+        stretched to width x height."""
+        rows = self.profile["rows"]
+        n = len(rows)
+        min_chord = width * _MIN_CHORD_FRACTION
+
+        def chord(y0, y1):
+            if y1 <= 0 or y0 >= height:
+                return width / 2.0 - min_chord / 2.0, min_chord
+            i0 = max(0, min(n - 1, int(math.floor(max(0.0, y0) / height * n))))
+            i1 = max(i0, min(n - 1, int(math.ceil(min(height, y1) / height * n)) - 1))
+            left = max(rows[i][0] for i in range(i0, i1 + 1)) * width
+            right = min(rows[i][1] for i in range(i0, i1 + 1)) * width
+            if right - left < min_chord:
+                center = (left + right) / 2.0
+                left = min(max(0.0, center - min_chord / 2.0), width - min_chord)
+                right = left + min_chord
+            return left, right - left
+        return chord
+
     def _relayout(self):
         width = self._content_width()
         full = lambda y0, y1: (0.0, width)
@@ -102,22 +140,24 @@ class ShapedTextDocumentLayout(QAbstractTextDocumentLayout):
         natural_height = max(1.0, natural_bottom)
 
         self.shaped_ok = False
-        height = natural_height * 1.1
+        profile = self.profile if self.profile and self.profile.get("rows") else None
+        if profile:
+            # The balloon's own height (its proportions, at this width): the
+            # text is centered in it, and the shape only stretches taller if
+            # the text doesn't fit.
+            start = max(1.0, width * float(profile.get("aspect") or 1.0))
+            make_chords = self._profile_chords
+        else:
+            # The shortest oval the text fits in.
+            start = natural_height * 1.1
+            make_chords = self._ellipse_chords
+        limit = max(start, natural_height) * _MAX_HEIGHT_FACTOR
+        height = start
         best = None
-        while height <= natural_height * _MAX_HEIGHT_FACTOR:
-            half_h, half_w, cx = height / 2.0, width / 2.0, width / 2.0
-            min_chord = width * _MIN_CHORD_FRACTION
+        while height <= limit:
+            chord = make_chords(width, height)
 
-            def chord(y0, y1, half_h=half_h, half_w=half_w, cx=cx, min_chord=min_chord):
-                # Narrowest chord of the ellipse across the line's band.
-                widths = []
-                for y in (y0, y1):
-                    d = (y - half_h) / half_h
-                    widths.append(2 * half_w * math.sqrt(max(0.0, 1 - d * d)))
-                w = max(min_chord, min(widths))
-                return cx - w / 2.0, w
-
-            # Center the text vertically in the oval (a couple of passes,
+            # Center the text vertically in the shape (a couple of passes,
             # since the line widths - and so the text height - depend on it).
             top = max(0.0, (height - natural_height) / 2.0)
             fits = False
